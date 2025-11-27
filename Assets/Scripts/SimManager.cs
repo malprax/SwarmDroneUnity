@@ -127,28 +127,31 @@ public class SimManager : MonoBehaviour
 
     // Dipanggil Drone saat menemukan target
     public void ObjectFound(Drone d)
+{
+    // Jangan diproses dua kali
+    if (found) return;
+
+    found = true;
+    running = false;   // HENTIKAN TIMER
+
+    string msg = (d == leader)
+        ? "Leader found the object"
+        : "Object found by member";
+
+    if (statusText != null)
     {
-        if (found) return;
-        found = true;
-        running = false;
-
-        string msg = (d == leader)
-            ? "Leader found the object"
-            : "Object found by member";
-
-        if (statusText != null)
-        {
-            statusText.text =
-                "Object Found In: " + timer.ToString("F1") + " s\n" +
-                msg + "\nAll drones returning to Home Base";
-        }
-
-        if (drones != null)
-        {
-            foreach (var dr in drones)
-                dr.ReturnHome();
-        }
-
-        Debug.Log("[SimManager] ObjectFound by " + d.droneName);
+        statusText.text =
+            "Object Found In: " + timer.ToString("F1") + " s\n" +
+            msg + "\nAll drones returning to Home Base";
     }
+
+    // Semua drone pulang, baik leader maupun member
+    if (drones != null)
+    {
+        foreach (var dr in drones)
+            dr.ReturnHome();
+    }
+
+    Debug.Log("[SimManager] ObjectFound by " + d.droneName);
+}
 }

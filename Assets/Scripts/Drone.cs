@@ -23,7 +23,7 @@ public class Drone : MonoBehaviour
     {
         rb = GetComponent<Rigidbody2D>();
         homePosition = transform.position;
-        manager = FindObjectOfType<SimManager>();
+        manager = Object.FindAnyObjectByType<SimManager>();
 
         Debug.Log($"[Drone] Awake {name}, home = {homePosition}");
     }
@@ -95,34 +95,38 @@ public class Drone : MonoBehaviour
 
     // TABRAKAN FISIK: Wall, drone lain, atau target
     void OnCollisionEnter2D(Collision2D col)
+{
+    // 1) Cek apakah ini TARGET?
+    SearchTarget target = col.collider.GetComponent<SearchTarget>();
+    if (target != null)
     {
-        // 1) Cek apakah ini TARGET?
-        SearchTarget target = col.collider.GetComponent<SearchTarget>();
-        if (target != null)
+        Debug.Log($"[Drone] {droneName} COLLISION with TARGET {target.name}");
+
+        // Siapa pun yang nabrak (leader/member) langsung lapor ke SimManager
+        if (manager != null)
         {
-            Debug.Log($"[Drone] {droneName} COLLISION with TARGET {target.name}");
-
-            if (searching && manager != null)
-            {
-                manager.ObjectFound(this);
-            }
-
-            searching = false;
-            rb.linearVelocity = Vector2.zero;
-            return;
+            manager.ObjectFound(this);
         }
 
-        // 2) Selain target → anggap dinding / drone lain → mantul
-        if (col.contacts.Length > 0)
-        {
-            Vector2 normal = col.contacts[0].normal;
+        // Drone yang menemukan berhenti mencari dan siap pulang
+        searching = false;
+        returningHome = true;
+        rb.linearVelocity = Vector2.zero;
 
-            if (moveDir == Vector2.zero)
-                moveDir = rb.linearVelocity.normalized;
-
-            moveDir = Vector2.Reflect(moveDir, normal).normalized;
-
-            Debug.Log($"[Drone] {droneName} bounce from {col.collider.name}, new dir = {moveDir}");
-        }
+        return;
     }
+
+    // 2) Selain target → anggap dinding / drone lain → mantul
+    if (col.contacts.Length > 0)
+    {
+        Vector2 normal = col.contacts[0].normal;
+
+        if (moveDir == Vector2.zero)
+            moveDir = rb.linearVelocity.normalized;
+
+        moveDir = Vector2.Reflect(moveDir, normal).normalized;
+
+        Debug.Log($"[Drone] {droneName} bounce from {col.collider.name}, new dir = {moveDir}");
+    }
+}
 }
