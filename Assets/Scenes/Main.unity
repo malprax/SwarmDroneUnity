@@ -249,7 +249,6 @@ MonoBehaviour:
   target: {fileID: 1663345215}
   timerText: {fileID: 2146774370}
   statusText: {fileID: 2133504470}
-  playButton: {fileID: 0}
 --- !u!4 &22667979
 Transform:
   m_ObjectHideFlags: 0
@@ -300,8 +299,6 @@ MonoBehaviour:
   isLeader: 0
   droneName: Drone
   moveSpeed: 2
-  avoidanceRadius: 0.3
-  targetDetectRadius: 0.35
 --- !u!58 &157097188
 CircleCollider2D:
   m_ObjectHideFlags: 0
@@ -2021,8 +2018,6 @@ MonoBehaviour:
   isLeader: 0
   droneName: Drone
   moveSpeed: 2
-  avoidanceRadius: 0.3
-  targetDetectRadius: 0.35
 --- !u!58 &1193971010
 CircleCollider2D:
   m_ObjectHideFlags: 0
@@ -2700,7 +2695,7 @@ GameObject:
   - component: {fileID: 1663345215}
   m_Layer: 6
   m_Name: TargetObject
-  m_TagString: Untagged
+  m_TagString: Target
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -3387,8 +3382,6 @@ MonoBehaviour:
   isLeader: 0
   droneName: Drone
   moveSpeed: 2
-  avoidanceRadius: 0.3
-  targetDetectRadius: 0.35
 --- !u!58 &2142304130
 CircleCollider2D:
   m_ObjectHideFlags: 0
