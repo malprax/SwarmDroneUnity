@@ -1,4 +1,5 @@
-# Swarm Drone Simulation - Clean Unity 6.2 Project
+# Swarm Drone Simulation Copyright Mechanical Engineering Hasanuddin University
+# Unity 6.2 Project
 
 This is a clean Unity 6.2 (6000.2.13f1) project skeleton for your 2D swarm drone simulation.
 
