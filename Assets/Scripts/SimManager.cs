@@ -46,24 +46,19 @@ public class SimManager : MonoBehaviour
     float foundTimer;
     float returnTimer;
 
-    // ======= PROTEKSI RANDOM =======
-    // kalau DoRandom dipanggil berkali-kali, hanya 1x yang dieksekusi
-    [Header("Random Protection")]
-    public float randomCooldown = 0.3f;   // jeda minimal antar-random (detik)
-    float lastRandomTime = -999f;
-
     void Start()
     {
         AssignDroneNames();
 
-        // random awal sekali (leader + room) hanya saat masuk Play Mode Unity
+        // random sekali saat awal Play Mode (leader + room)
         InitialRandomSetup();
         InitRoles();
-        UpdateObjectLabelFromTarget();
-
         ResetSimulationState();
 
-        // set warna awal tombol
+        // pastikan label object sesuai posisi target awal
+        UpdateObjectLabelFromTarget();
+
+        // warna awal tombol
         if (playButtonImage  != null) playButtonImage.color  = playIdleColor;
         if (resetButtonImage != null) resetButtonImage.color = resetIdleColor;
         if (randomButtonImage!= null) randomButtonImage.color= randomIdleColor;
@@ -73,16 +68,14 @@ public class SimManager : MonoBehaviour
     //  BUTTON EVENTS
     // =========================================================
 
-    public void Play()
+    // ==== PLAY ====
+    // Hook: Button_Play → SimManager.PlayButton
+    public void PlayButton()
     {
-        StartCoroutine(PlayButtonRoutine());
-    }
+        // efek warna
+        if (playButtonImage) StartCoroutine(ButtonFlashRoutine(playButtonImage, playIdleColor));
 
-    IEnumerator PlayButtonRoutine()
-    {
-        if (playButtonImage) playButtonImage.color = pressedColor;
-        yield return null;
-
+        // logika utama
         ResetSimulationState();
 
         searchingPhase = true;
@@ -98,64 +91,41 @@ public class SimManager : MonoBehaviour
 
         InitRoles();
         UpdateObjectLabelFromTarget();
-
-        yield return new WaitForSeconds(0.15f);
-        if (playButtonImage) playButtonImage.color = playIdleColor;
     }
 
+    // ==== RESET ====
+    // Hook: Button_Reset → SimManager.ResetButton
     public void ResetButton()
     {
-        StartCoroutine(ResetButtonRoutine());
-    }
-
-    IEnumerator ResetButtonRoutine()
-    {
-        if (resetButtonImage) resetButtonImage.color = pressedColor;
-        yield return null;
+        if (resetButtonImage) StartCoroutine(ButtonFlashRoutine(resetButtonImage, resetIdleColor));
 
         ResetSimulationState();
         InitRoles();
         UpdateObjectLabelFromTarget();
-
-        yield return new WaitForSeconds(0.15f);
-        if (resetButtonImage) resetButtonImage.color = resetIdleColor;
     }
 
+    // ==== RANDOM ====
+    // Hook: Button_Random → SimManager.RandomButton
     public void RandomButton()
     {
-        // tetap pakai coroutine supaya efek warna tombol enak
-        StartCoroutine(RandomButtonRoutine());
+        if (randomButtonImage) StartCoroutine(ButtonFlashRoutine(randomButtonImage, randomIdleColor));
+
+        DoRandom();  // random sekali per klik
     }
 
-    IEnumerator RandomButtonRoutine()
+    // Helper umum untuk kedip warna tombol
+    IEnumerator ButtonFlashRoutine(Image img, Color idleColor)
     {
-        if (randomButtonImage) randomButtonImage.color = pressedColor;
-        yield return null;
+        if (img == null) yield break;
 
-        DoRandom();        // ⬅️ random (dengan cooldown di dalam)
-
+        Color original = idleColor;
+        img.color = pressedColor;
         yield return new WaitForSeconds(0.15f);
-        if (randomButtonImage) randomButtonImage.color = randomIdleColor;
+        img.color = original;
     }
-
-    // =========================================================
-    //  RANDOM LOGIC (DENGAN COOLDOWN)
-    // =========================================================
 
     void DoRandom()
     {
-        float now = Time.time;
-
-        // ⬇️ kalau terlalu cepat setelah random sebelumnya → abaikan
-        if (now - lastRandomTime < randomCooldown)
-        {
-            Debug.Log($"[SimManager] DoRandom DIABAIKAN (cooldown) frame: {Time.frameCount}");
-            return;
-        }
-
-        lastRandomTime = now;
-        Debug.Log($"[SimManager] DoRandom JALAN pada frame: {Time.frameCount}");
-
         // Random leader
         if (drones != null && drones.Length > 0)
         {
@@ -176,19 +146,18 @@ public class SimManager : MonoBehaviour
             targetObject.position = targetSpawns[spawnIdx].position;
             UpdateObjectLabel(spawnIdx);
         }
-        else
-        {
-            if (objectText) objectText.text = "Object: None";
-        }
 
-        // Reset drone & timer, tapi biarkan leader dan room hasil random tadi
+        // Reset waktu & posisi drone ke home
         ResetSimulationState();
     }
 
-    // Random awal saat baru Play Mode
+    // =========================================================
+    //  INITIAL RANDOM (saat baru masuk Play Mode Unity)
+    // =========================================================
+
     void InitialRandomSetup()
     {
-        // random leader awal
+        // leader awal
         if (drones != null && drones.Length > 0)
         {
             int idx = Random.Range(0, drones.Length);
@@ -199,7 +168,7 @@ public class SimManager : MonoBehaviour
             }
         }
 
-        // random room awal
+        // room target awal
         if (targetObject != null && targetSpawns != null && targetSpawns.Length > 0)
         {
             int spawnIdx = Random.Range(0, targetSpawns.Length);
