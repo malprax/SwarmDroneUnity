@@ -24,19 +24,24 @@ public class SimManager : MonoBehaviour
     public Color memberColor = Color.cyan;
 
     [Header("Buttons")]
-    public Button playButton;
-    public Image  playButtonImage;
-    public Color  playIdleColor  = new Color(0.4f, 1f, 0.4f);      // hijau
+    // === PLAY / STOP (hijau) ===
+    public Button  playButton;
+    public Image   playButtonImage;
+    public TMP_Text playButtonText;
+    public Color   playIdleColor  = new Color(0.4f, 1f, 0.4f);      // hijau
 
-    public Button resetButton;
-    public Image  resetButtonImage;
-    public Color  resetIdleColor = Color.blue;                     // biru
+    // === PAUSE (biru, bekas reset) ===
+    public Button  pauseButton;
+    public Image   pauseButtonImage;
+    public TMP_Text pauseButtonText;
+    public Color   pauseIdleColor = Color.blue;                     // biru
 
-    public Button randomButton;
-    public Image  randomButtonImage;
-    public Color  randomIdleColor = new Color(1f, 0.92f, 0.016f);  // kuning
+    // === RANDOM (kuning) ===
+    public Button  randomButton;
+    public Image   randomButtonImage;
+    public Color   randomIdleColor = new Color(1f, 0.92f, 0.016f);  // kuning
 
-    public Color  pressedColor    = new Color(0.6f, 0.6f, 0.6f);   // abu-abu
+    public Color   pressedColor    = new Color(0.6f, 0.6f, 0.6f);   // abu-abu
 
     // ======= TIMER STATE =======
     bool searchingPhase;
@@ -46,8 +51,15 @@ public class SimManager : MonoBehaviour
     float foundTimer;
     float returnTimer;
 
+    // ======= PLAY / PAUSE STATE =======
+    bool isPlaying = false;
+    bool isPaused  = false;
+
     void Start()
     {
+        // pastikan waktu berjalan normal
+        Time.timeScale = 1f;
+
         AssignDroneNames();
 
         // Random awal sekali: leader + room + reset + label
@@ -55,54 +67,116 @@ public class SimManager : MonoBehaviour
 
         // warna awal tombol
         if (playButtonImage  != null) playButtonImage.color  = playIdleColor;
-        if (resetButtonImage != null) resetButtonImage.color = resetIdleColor;
+        if (pauseButtonImage != null) pauseButtonImage.color = pauseIdleColor;
         if (randomButtonImage!= null) randomButtonImage.color= randomIdleColor;
+
+        // teks awal tombol
+        if (playButtonText  != null) playButtonText.text  = "Play";
+        if (pauseButtonText != null) pauseButtonText.text = "Pause";
     }
 
     // =========================================================
     //  BUTTON EVENTS
     // =========================================================
 
-    // ==== PLAY ====
+    // ==== PLAY / STOP (satu tombol hijau) ====
     // Hook: Button_Play → SimManager.PlayButton
     public void PlayButton()
     {
-        // efek warna
-        if (playButtonImage) StartCoroutine(ButtonFlashRoutine(playButtonImage, playIdleColor));
+        // kalau belum playing → mulai
+        if (!isPlaying)
+        {
+            Debug.Log("[SimManager] PlayButton pressed → START");
+            Time.timeScale = 1f;
 
-        // logika utama
-        ResetSimulationState();
+            if (playButtonImage) StartCoroutine(ButtonFlashRoutine(playButtonImage, playIdleColor));
 
-        searchingPhase = true;
-        targetFound    = false;
-        returnPhase    = false;
+            // logika utama start
+            ResetSimulationState();
 
-        if (statusText)
-            statusText.text = "Searching...";
+            searchingPhase = true;
+            targetFound    = false;
+            returnPhase    = false;
 
-        foreach (var d in drones)
-            if (d != null)
-                d.StartSearch();
+            if (statusText)
+                statusText.text = "Searching...";
 
-        InitRoles();
-        UpdateObjectLabelFromTarget();
+            foreach (var d in drones)
+                if (d != null)
+                    d.StartSearch();
+
+            InitRoles();
+            UpdateObjectLabelFromTarget();
+
+            isPlaying = true;
+            isPaused  = false;
+
+            if (playButtonText != null) playButtonText.text = "Stop";
+            if (pauseButtonText != null) pauseButtonText.text = "Pause";
+        }
+        else
+        {
+            // kalau sudah playing, klik Play lagi dianggap STOP
+            StopButton();
+        }
     }
 
-    // ==== RESET ====
-    // Hook: Button_Reset → SimManager.ResetButton
-    public void ResetButton()
+    // Fungsi STOP (reset simulasi, kembalikan tombol jadi Play)
+    public void StopButton()
     {
-        if (resetButtonImage) StartCoroutine(ButtonFlashRoutine(resetButtonImage, resetIdleColor));
+        Debug.Log("[SimManager] StopButton executed");
+        Time.timeScale = 1f;
+
+        if (playButtonImage) StartCoroutine(ButtonFlashRoutine(playButtonImage, playIdleColor));
 
         ResetSimulationState();
         InitRoles();
         UpdateObjectLabelFromTarget();
+
+        isPlaying = false;
+        isPaused  = false;
+
+        if (playButtonText  != null) playButtonText.text  = "Play";
+        if (pauseButtonText != null) pauseButtonText.text = "Pause";
+    }
+
+    // ==== PAUSE ====
+    // Hook: Button_Pause → SimManager.PauseButton
+    public void PauseButton()
+    {
+        Debug.Log("[SimManager] PauseButton pressed");
+
+        if (pauseButtonImage) StartCoroutine(ButtonFlashRoutine(pauseButtonImage, pauseIdleColor));
+
+        // kalau belum mulai main, pause tidak melakukan apa-apa
+        if (!isPlaying)
+            return;
+
+        isPaused = !isPaused;
+
+        if (isPaused)
+        {
+            Time.timeScale = 0f;
+            if (statusText != null)
+                statusText.text = "Paused";
+            if (pauseButtonText != null)
+                pauseButtonText.text = "Resume";
+        }
+        else
+        {
+            Time.timeScale = 1f;
+            if (statusText != null)
+                statusText.text = "Searching...";
+            if (pauseButtonText != null)
+                pauseButtonText.text = "Pause";
+        }
     }
 
     // ==== RANDOM ====
     // Hook: Button_Random → SimManager.RandomButton
     public void RandomButton()
     {
+        Debug.Log("[SimManager] RandomButton pressed");
         if (randomButtonImage) StartCoroutine(ButtonFlashRoutine(randomButtonImage, randomIdleColor));
 
         DoRandom();  // random sekali per klik
@@ -156,13 +230,13 @@ public class SimManager : MonoBehaviour
 
     void Update()
     {
-        if (searchingPhase && !targetFound)
+        if (searchingPhase && !targetFound && !isPaused)
         {
             foundTimer += Time.deltaTime;
             UpdateTimerUI();
         }
 
-        if (returnPhase)
+        if (returnPhase && !isPaused)
         {
             returnTimer += Time.deltaTime;
             UpdateTimerUI();
@@ -183,6 +257,9 @@ public class SimManager : MonoBehaviour
 
     void ResetSimulationState()
     {
+        // pastikan tidak kepause
+        Time.timeScale = 1f;
+
         searchingPhase = false;
         targetFound    = false;
         returnPhase    = false;
