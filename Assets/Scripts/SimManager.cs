@@ -17,7 +17,7 @@ public class SimManager : MonoBehaviour
     public TMP_Text timeReturnText;
     public TMP_Text statusText;
     public TMP_Text leaderText;
-    public TMP_Text objectText;        // teks "Object: Room X"
+    public TMP_Text objectText;        // "Object: Room X"
 
     [Header("Role Colors")]
     public Color leaderColor = Color.red;
@@ -46,14 +46,20 @@ public class SimManager : MonoBehaviour
     float foundTimer;
     float returnTimer;
 
-    // guard supaya Random tidak dipanggil berulang
-    bool randomInProgress = false;
+    // ======= PROTEKSI RANDOM =======
+    // kalau DoRandom dipanggil berkali-kali, hanya 1x yang dieksekusi
+    [Header("Random Protection")]
+    public float randomCooldown = 0.3f;   // jeda minimal antar-random (detik)
+    float lastRandomTime = -999f;
 
     void Start()
     {
         AssignDroneNames();
+
+        // random awal sekali (leader + room) hanya saat masuk Play Mode Unity
+        InitialRandomSetup();
         InitRoles();
-        UpdateObjectLabelFromTarget();   // kalau belum ada room → None
+        UpdateObjectLabelFromTarget();
 
         ResetSimulationState();
 
@@ -67,7 +73,6 @@ public class SimManager : MonoBehaviour
     //  BUTTON EVENTS
     // =========================================================
 
-    // -------- PLAY --------
     public void Play()
     {
         StartCoroutine(PlayButtonRoutine());
@@ -91,14 +96,13 @@ public class SimManager : MonoBehaviour
             if (d != null)
                 d.StartSearch();
 
-        InitRoles();                     // pastikan teks Leader benar
-        UpdateObjectLabelFromTarget();   // pastikan teks Object benar
+        InitRoles();
+        UpdateObjectLabelFromTarget();
 
         yield return new WaitForSeconds(0.15f);
         if (playButtonImage) playButtonImage.color = playIdleColor;
     }
 
-    // -------- RESET --------
     public void ResetButton()
     {
         StartCoroutine(ResetButtonRoutine());
@@ -117,36 +121,41 @@ public class SimManager : MonoBehaviour
         if (resetButtonImage) resetButtonImage.color = resetIdleColor;
     }
 
-    // -------- RANDOM (klik sekali = random sekali) --------
     public void RandomButton()
     {
-        // kalau lagi proses random, abaikan klik berikutnya
-        if (randomInProgress) return;
-
-        StartCoroutine(RandomOnceRoutine());
+        // tetap pakai coroutine supaya efek warna tombol enak
+        StartCoroutine(RandomButtonRoutine());
     }
 
-    IEnumerator RandomOnceRoutine()
+    IEnumerator RandomButtonRoutine()
     {
-         if (randomInProgress) yield break;
-    randomInProgress = true;
+        if (randomButtonImage) randomButtonImage.color = pressedColor;
+        yield return null;
 
-    Debug.Log("RandomButton DIKLIK pada frame: " + Time.frameCount);
+        DoRandom();        // ⬅️ random (dengan cooldown di dalam)
 
-    if (randomButtonImage) randomButtonImage.color = pressedColor;
-    yield return null;
-
-    DoRandom();
-
-    yield return new WaitForSeconds(0.15f);
-    if (randomButtonImage) randomButtonImage.color = randomIdleColor;
-
-    randomInProgress = false;
+        yield return new WaitForSeconds(0.15f);
+        if (randomButtonImage) randomButtonImage.color = randomIdleColor;
     }
+
+    // =========================================================
+    //  RANDOM LOGIC (DENGAN COOLDOWN)
+    // =========================================================
 
     void DoRandom()
     {
-        Debug.Log("DoRandom DIPANGGIL pada frame: " + Time.frameCount);
+        float now = Time.time;
+
+        // ⬇️ kalau terlalu cepat setelah random sebelumnya → abaikan
+        if (now - lastRandomTime < randomCooldown)
+        {
+            Debug.Log($"[SimManager] DoRandom DIABAIKAN (cooldown) frame: {Time.frameCount}");
+            return;
+        }
+
+        lastRandomTime = now;
+        Debug.Log($"[SimManager] DoRandom JALAN pada frame: {Time.frameCount}");
+
         // Random leader
         if (drones != null && drones.Length > 0)
         {
@@ -172,8 +181,35 @@ public class SimManager : MonoBehaviour
             if (objectText) objectText.text = "Object: None";
         }
 
-        // Reset waktu & posisi drone ke home
+        // Reset drone & timer, tapi biarkan leader dan room hasil random tadi
         ResetSimulationState();
+    }
+
+    // Random awal saat baru Play Mode
+    void InitialRandomSetup()
+    {
+        // random leader awal
+        if (drones != null && drones.Length > 0)
+        {
+            int idx = Random.Range(0, drones.Length);
+            for (int i = 0; i < drones.Length; i++)
+            {
+                if (drones[i] == null) continue;
+                drones[i].isLeader = (i == idx);
+            }
+        }
+
+        // random room awal
+        if (targetObject != null && targetSpawns != null && targetSpawns.Length > 0)
+        {
+            int spawnIdx = Random.Range(0, targetSpawns.Length);
+            targetObject.position = targetSpawns[spawnIdx].position;
+            UpdateObjectLabel(spawnIdx);
+        }
+        else
+        {
+            if (objectText) objectText.text = "Object: None";
+        }
     }
 
     // =========================================================
