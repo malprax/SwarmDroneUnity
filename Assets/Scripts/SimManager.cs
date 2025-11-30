@@ -25,23 +25,23 @@ public class SimManager : MonoBehaviour
 
     [Header("Buttons")]
     // === PLAY / STOP (hijau) ===
-    public Button  playButton;
-    public Image   playButtonImage;
+    public Button   playButton;
+    public Image    playButtonImage;
     public TMP_Text playButtonText;
-    public Color   playIdleColor  = new Color(0.4f, 1f, 0.4f);      // hijau
+    public Color    playIdleColor  = new Color(0.4f, 1f, 0.4f);      // hijau
 
     // === PAUSE (biru, bekas reset) ===
-    public Button  pauseButton;
-    public Image   pauseButtonImage;
+    public Button   pauseButton;
+    public Image    pauseButtonImage;
     public TMP_Text pauseButtonText;
-    public Color   pauseIdleColor = Color.blue;                     // biru
+    public Color    pauseIdleColor = Color.blue;                     // biru
 
     // === RANDOM (kuning) ===
-    public Button  randomButton;
-    public Image   randomButtonImage;
-    public Color   randomIdleColor = new Color(1f, 0.92f, 0.016f);  // kuning
+    public Button   randomButton;
+    public Image    randomButtonImage;
+    public Color    randomIdleColor = new Color(1f, 0.92f, 0.016f);  // kuning
 
-    public Color   pressedColor    = new Color(0.6f, 0.6f, 0.6f);   // abu-abu
+    public Color    pressedColor    = new Color(0.6f, 0.6f, 0.6f);   // abu-abu
 
     // ======= TIMER STATE =======
     bool searchingPhase;
@@ -61,6 +61,12 @@ public class SimManager : MonoBehaviour
         Time.timeScale = 1f;
 
         AssignDroneNames();
+
+        // kalau label tombol belum di-assign, cari otomatis di child
+        if (playButtonText == null && playButton != null)
+            playButtonText = playButton.GetComponentInChildren<TMP_Text>();
+        if (pauseButtonText == null && pauseButton != null)
+            pauseButtonText = pauseButton.GetComponentInChildren<TMP_Text>();
 
         // Random awal sekali: leader + room + reset + label
         DoRandom();
@@ -91,8 +97,8 @@ public class SimManager : MonoBehaviour
 
             if (playButtonImage) StartCoroutine(ButtonFlashRoutine(playButtonImage, playIdleColor));
 
-            // logika utama start
-            ResetSimulationState();
+            // reset state & drone TANPA menulis "Press Play to start."
+            ResetSimulationState(false);
 
             searchingPhase = true;
             targetFound    = false;
@@ -129,7 +135,8 @@ public class SimManager : MonoBehaviour
 
         if (playButtonImage) StartCoroutine(ButtonFlashRoutine(playButtonImage, playIdleColor));
 
-        ResetSimulationState();
+        // reset + tulis pesan awal
+        ResetSimulationState(true);
         InitRoles();
         UpdateObjectLabelFromTarget();
 
@@ -220,8 +227,8 @@ public class SimManager : MonoBehaviour
             if (objectText) objectText.text = "Object: None";
         }
 
-        // Reset waktu & posisi drone ke home
-        ResetSimulationState();
+        // Reset waktu & posisi drone ke home + tulis pesan awal
+        ResetSimulationState(true);
     }
 
     // =========================================================
@@ -255,7 +262,8 @@ public class SimManager : MonoBehaviour
         }
     }
 
-    void ResetSimulationState()
+    // showStartMessage: kalau true tulis "Press Play to start."
+    void ResetSimulationState(bool showStartMessage = true)
     {
         // pastikan tidak kepause
         Time.timeScale = 1f;
@@ -273,7 +281,7 @@ public class SimManager : MonoBehaviour
 
         UpdateTimerUI();
 
-        if (statusText)
+        if (showStartMessage && statusText != null)
             statusText.text = "Press Play to start.";
     }
 

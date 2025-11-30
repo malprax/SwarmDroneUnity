@@ -254,10 +254,12 @@ MonoBehaviour:
   memberColor: {r: 0, g: 1, b: 1, a: 1}
   playButton: {fileID: 0}
   playButtonImage: {fileID: 0}
+  playButtonText: {fileID: 0}
   playIdleColor: {r: 0.4, g: 1, b: 0.4, a: 1}
-  resetButton: {fileID: 0}
-  resetButtonImage: {fileID: 0}
-  resetIdleColor: {r: 0, g: 0, b: 1, a: 1}
+  pauseButton: {fileID: 0}
+  pauseButtonImage: {fileID: 0}
+  pauseButtonText: {fileID: 0}
+  pauseIdleColor: {r: 0, g: 0, b: 1, a: 1}
   randomButton: {fileID: 0}
   randomButtonImage: {fileID: 0}
   randomIdleColor: {r: 1, g: 0.92, b: 0.016, a: 1}
@@ -3539,7 +3541,7 @@ GameObject:
   - component: {fileID: 1459279014}
   - component: {fileID: 1459279013}
   m_Layer: 5
-  m_Name: Button_Reset
+  m_Name: Button_Pause
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -3611,7 +3613,7 @@ MonoBehaviour:
       m_Calls:
       - m_Target: {fileID: 22667978}
         m_TargetAssemblyTypeName: SimManager, Assembly-CSharp
-        m_MethodName: ResetButton
+        m_MethodName: PauseButton
         m_Mode: 1
         m_Arguments:
           m_ObjectArgument: {fileID: 0}
