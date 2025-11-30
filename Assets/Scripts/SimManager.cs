@@ -56,12 +56,12 @@ public class SimManager : MonoBehaviour
 
     // --- tiga method reset, biar gampang di-hook dari Button ---
     public void ResetButton() => ResetSimulationState();
-    public void ResetSim()    => ResetSimulationState();
-    public void Reset()       => ResetSimulationState();
+    // public void ResetSim()    => ResetSimulationState();
+    // public void Reset()       => ResetSimulationState();
 
     // --- wrapper untuk berbagai nama tombol Random di scene ---
     public void RandomButton() => DoRandom();
-    public void RandomSim()    => DoRandom();
+    // public void RandomSim()    => DoRandom();
     // JANGAN ada method bernama Random() di sini
 
     void DoRandom()
