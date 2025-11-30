@@ -3,155 +3,226 @@ using TMPro;
 
 public class SimManager : MonoBehaviour
 {
-    [Header("Scene References")]
+    [Header("Drones")]
     public Drone[] drones;
-    public Transform[] roomSpawnPoints;   // 3 spawn points, satu per ruangan
-    public SearchTarget target;
+
+    [Header("Target")]
+    public Transform targetObject;
+    public Transform[] targetSpawns;
 
     [Header("UI")]
-    public TMP_Text timerText;
+    public TMP_Text timeFoundText;
+    public TMP_Text timeReturnText;
     public TMP_Text statusText;
+    public TMP_Text leaderText;
 
-    float timer;
-    bool running;
-    bool found;
-    bool hasRandomized;      // sudah tekan Random atau belum
-    Drone leader;
+    [Header("Role Colors")]
+    public Color leaderColor = Color.red;
+    public Color memberColor = Color.cyan;
+
+    // ======= TIMER STATE =======
+    bool searchingPhase;
+    bool targetFound;
+    bool returnPhase;
+
+    float foundTimer;
+    float returnTimer;
 
     void Start()
     {
-        AssignLeader();
-        ResetSim();
+        InitRoles();
+        ResetSimulationState();
     }
 
-    void Update()
-    {
-        if (running && !found)
-        {
-            timer += Time.deltaTime;
-            if (timerText != null)
-                timerText.text = "Time: " + timer.ToString("F1") + " s";
-        }
-    }
+    // =========================================================
+    //  DIPANGGIL DARI TOMBOL UI
+    // =========================================================
 
-    void AssignLeader()
-    {
-        if (drones == null || drones.Length == 0) return;
-
-        int index = Random.Range(0, drones.Length);
-        for (int i = 0; i < drones.Length; i++)
-        {
-            bool isL = (i == index);
-            drones[i].isLeader = isL;
-            drones[i].droneName = "Drone " + (i + 1);
-            if (isL) leader = drones[i];
-        }
-    }
-
-    // ================== DIPANGGIL DARI TOMBOL UI ==================
-
-    // 🟨 Random
-    public void RandomizeObject()
-    {
-        // hanya boleh sebelum Play dan sebelum ditemukan
-        if (running || found || hasRandomized) return;
-        if (roomSpawnPoints == null || roomSpawnPoints.Length == 0 || target == null) return;
-
-        Transform p = roomSpawnPoints[Random.Range(0, roomSpawnPoints.Length)];
-        target.transform.position = p.position;
-        target.gameObject.SetActive(true);
-        hasRandomized = true;
-
-        if (statusText != null)
-            statusText.text = "Target placed. Press Play to start.";
-
-        Debug.Log("[SimManager] RandomizeObject → " + p.name);
-    }
-
-    // 🟩 Play
     public void Play()
     {
-        if (running) return; // jangan bisa double start
+        ResetSimulationState();
 
-        if (!hasRandomized)
-        {
-            if (statusText != null)
-                statusText.text = "Press Random first to place the target.";
-            Debug.LogWarning("[SimManager] Play pressed but target not randomized.");
-            return;
-        }
-
-        timer = 0f;
-        found = false;
-        running = true;
-
-        if (drones != null)
-        {
-            foreach (var d in drones)
-                d.StartSearch();
-        }
+        searchingPhase = true;
+        targetFound = false;
+        returnPhase = false;
 
         if (statusText != null)
             statusText.text = "Searching...";
 
-        Debug.Log("[SimManager] Simulation started.");
+        foreach (var d in drones)
+            if (d != null)
+                d.StartSearch();
     }
 
-    // 🟪 Reset
-    public void ResetSim()
+    // --- tiga method reset, biar gampang di-hook dari Button ---
+    public void ResetButton() => ResetSimulationState();
+    public void ResetSim()    => ResetSimulationState();
+    public void Reset()       => ResetSimulationState();
+
+    // --- wrapper untuk berbagai nama tombol Random di scene ---
+    public void RandomButton() => DoRandom();
+    public void RandomSim()    => DoRandom();
+    // JANGAN ada method bernama Random() di sini
+
+    void DoRandom()
     {
-        running = false;
-        found = false;
-        hasRandomized = false;
-        timer = 0f;
-
-        if (timerText != null)
-            timerText.text = "Time: 0.0 s";
-
-        if (drones != null)
+        // Random leader
+        if (drones != null && drones.Length > 0)
         {
-            foreach (var d in drones)
-                d.ResetDrone();
+            int idx = UnityEngine.Random.Range(0, drones.Length);
+            for (int i = 0; i < drones.Length; i++)
+            {
+                if (drones[i] == null) continue;
+                drones[i].isLeader = (i == idx);
+            }
         }
 
-        if (target != null)
-            target.gameObject.SetActive(false);
+        InitRoles();
 
-        AssignLeader();
+        // Random posisi target
+        if (targetObject != null && targetSpawns != null && targetSpawns.Length > 0)
+        {
+            int spawnIdx = UnityEngine.Random.Range(0, targetSpawns.Length);
+            targetObject.position = targetSpawns[spawnIdx].position;
+        }
+
+        // Reset waktu & posisi drone ke home
+        ResetSimulationState();
+    }
+
+    // =========================================================
+    //  TIMERS
+    // =========================================================
+
+    void Update()
+    {
+        if (searchingPhase && !targetFound)
+        {
+            foundTimer += Time.deltaTime;
+            UpdateTimerUI();
+        }
+
+        if (returnPhase)
+        {
+            returnTimer += Time.deltaTime;
+            UpdateTimerUI();
+        }
+    }
+
+    void UpdateTimerUI()
+    {
+        if (timeFoundText != null)
+            timeFoundText.text = $"Found: {foundTimer:0.0} s";
+
+        if (timeReturnText != null)
+        {
+            float shown = returnPhase ? returnTimer : 0f;
+            timeReturnText.text = $"Return: {shown:0.0} s";
+        }
+    }
+
+    void ResetSimulationState()
+    {
+        searchingPhase = false;
+        targetFound    = false;
+        returnPhase    = false;
+
+        foundTimer  = 0f;
+        returnTimer = 0f;
+
+        foreach (var d in drones)
+            if (d != null)
+                d.ResetDrone();
+
+        UpdateTimerUI();
 
         if (statusText != null)
-            statusText.text = "Ready. Press Random to place the target.";
-
-        Debug.Log("[SimManager] ResetSim() done.");
+            statusText.text = "Press Play to start.";
     }
 
-    // Dipanggil Drone saat menemukan target
-    public void ObjectFound(Drone d)
-{
-    // Jangan diproses dua kali
-    if (found) return;
+    // =========================================================
+    //  ROLE / LEADER
+    // =========================================================
 
-    found = true;
-    running = false;   // HENTIKAN TIMER
-
-    string msg = (d == leader)
-        ? "Leader found the object"
-        : "Object found by member";
-
-    if (statusText != null)
+    void InitRoles()
     {
-        statusText.text =
-            "Object Found In: " + timer.ToString("F1") + " s\n" +
-            msg + "\nAll drones returning to Home Base";
+        if (drones == null || drones.Length == 0)
+            return;
+
+        int leaderIndex = -1;
+
+        // Cek apakah sudah ada isLeader = true
+        for (int i = 0; i < drones.Length; i++)
+        {
+            if (drones[i] != null && drones[i].isLeader)
+            {
+                leaderIndex = i;
+                break;
+            }
+        }
+
+        if (leaderIndex < 0)
+            leaderIndex = 0;
+
+        for (int i = 0; i < drones.Length; i++)
+        {
+            if (drones[i] == null) continue;
+
+            drones[i].isLeader = (i == leaderIndex);
+            drones[i].ApplyRoleVisual(leaderColor, memberColor);
+        }
+
+        if (leaderText != null && drones[leaderIndex] != null)
+            leaderText.text = $"Leader: {drones[leaderIndex].droneName}";
     }
 
-    // Semua drone pulang, baik leader maupun member
-    if (drones != null)
+    // =========================================================
+    //  CALLBACK DARI DRONE & TARGET
+    // =========================================================
+
+    public void OnDroneFoundTarget(Drone d)
     {
-        foreach (var dr in drones)
-            dr.ReturnHome();
+        if (d == null) return;
+        if (targetFound) return;   // hanya temuan pertama yang dihitung
+
+        targetFound    = true;
+        searchingPhase = false;
+        returnPhase    = true;
+
+        if (statusText != null)
+            statusText.text = $"{d.droneName} found target. All drones returning to Home Base";
+
+        returnTimer = 0f;
+        UpdateTimerUI();
+
+        foreach (var drone in drones)
+            if (drone != null)
+                drone.ReturnHome();
     }
 
-    Debug.Log("[SimManager] ObjectFound by " + d.droneName);
-}
+    public void OnDroneReachedHome(Drone d)
+    {
+        if (!returnPhase) return;
+
+        bool allHome = true;
+        foreach (var drone in drones)
+        {
+            if (drone == null) continue;
+            if (!drone.IsAtHome)
+            {
+                allHome = false;
+                break;
+            }
+        }
+
+        if (allHome)
+        {
+            returnPhase = false;
+
+            if (statusText != null)
+                statusText.text = "All drones at Home Base";
+
+            UpdateTimerUI();
+        }
+    }
 }
