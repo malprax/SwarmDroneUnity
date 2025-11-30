@@ -1,4 +1,6 @@
+using System.Collections;
 using UnityEngine;
+using UnityEngine.UI;
 using TMPro;
 
 public class SimManager : MonoBehaviour
@@ -20,6 +22,16 @@ public class SimManager : MonoBehaviour
     public Color leaderColor = Color.red;
     public Color memberColor = Color.cyan;
 
+    [Header("Buttons")]
+    public Button randomButton;
+    public Image randomButtonImage;
+
+    [Tooltip("Warna tombol Random saat idle (kuning).")]
+    public Color randomIdleColor = new Color(1f, 0.92f, 0.016f); // kuning emas
+
+    [Tooltip("Warna tombol Random saat ditekan (abu-abu).")]
+    public Color randomPressedColor = new Color(0.6f, 0.6f, 0.6f); // abu-abu
+
     // ======= TIMER STATE =======
     bool searchingPhase;
     bool targetFound;
@@ -32,6 +44,10 @@ public class SimManager : MonoBehaviour
     {
         InitRoles();
         ResetSimulationState();
+
+        // Pastikan warna awal tombol Random = idle color
+        if (randomButtonImage != null)
+            randomButtonImage.color = randomIdleColor;
     }
 
     // =========================================================
@@ -54,15 +70,36 @@ public class SimManager : MonoBehaviour
                 d.StartSearch();
     }
 
-    // --- tiga method reset, biar gampang di-hook dari Button ---
-    public void ResetButton() => ResetSimulationState();
-    // public void ResetSim()    => ResetSimulationState();
-    // public void Reset()       => ResetSimulationState();
+    public void ResetButton()
+    {
+        ResetSimulationState();
+    }
 
-    // --- wrapper untuk berbagai nama tombol Random di scene ---
-    public void RandomButton() => DoRandom();
-    // public void RandomSim()    => DoRandom();
-    // JANGAN ada method bernama Random() di sini
+    public void RandomButton()
+    {
+        StartCoroutine(RandomButtonRoutine());
+    }
+
+    // Coroutine untuk efek warna tombol Random
+    private IEnumerator RandomButtonRoutine()
+    {
+        // Ubah warna jadi abu-abu saat ditekan
+        if (randomButtonImage != null)
+            randomButtonImage.color = randomPressedColor;
+
+        // Tunggu 1 frame (biar UI sempat redraw)
+        yield return null;
+
+        // Jalankan logika random
+        DoRandom();
+
+        // Delay kecil supaya efek "tekan" kelihatan
+        yield return new WaitForSeconds(0.15f);
+
+        // Kembali ke warna kuning
+        if (randomButtonImage != null)
+            randomButtonImage.color = randomIdleColor;
+    }
 
     void DoRandom()
     {
