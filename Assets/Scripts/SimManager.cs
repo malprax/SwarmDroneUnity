@@ -50,13 +50,8 @@ public class SimManager : MonoBehaviour
     {
         AssignDroneNames();
 
-        // random sekali saat awal Play Mode (leader + room)
-        InitialRandomSetup();
-        InitRoles();
-        ResetSimulationState();
-
-        // pastikan label object sesuai posisi target awal
-        UpdateObjectLabelFromTarget();
+        // Random awal sekali: leader + room + reset + label
+        DoRandom();
 
         // warna awal tombol
         if (playButtonImage  != null) playButtonImage.color  = playIdleColor;
@@ -146,39 +141,13 @@ public class SimManager : MonoBehaviour
             targetObject.position = targetSpawns[spawnIdx].position;
             UpdateObjectLabel(spawnIdx);
         }
-
-        // Reset waktu & posisi drone ke home
-        ResetSimulationState();
-    }
-
-    // =========================================================
-    //  INITIAL RANDOM (saat baru masuk Play Mode Unity)
-    // =========================================================
-
-    void InitialRandomSetup()
-    {
-        // leader awal
-        if (drones != null && drones.Length > 0)
-        {
-            int idx = Random.Range(0, drones.Length);
-            for (int i = 0; i < drones.Length; i++)
-            {
-                if (drones[i] == null) continue;
-                drones[i].isLeader = (i == idx);
-            }
-        }
-
-        // room target awal
-        if (targetObject != null && targetSpawns != null && targetSpawns.Length > 0)
-        {
-            int spawnIdx = Random.Range(0, targetSpawns.Length);
-            targetObject.position = targetSpawns[spawnIdx].position;
-            UpdateObjectLabel(spawnIdx);
-        }
         else
         {
             if (objectText) objectText.text = "Object: None";
         }
+
+        // Reset waktu & posisi drone ke home
+        ResetSimulationState();
     }
 
     // =========================================================
