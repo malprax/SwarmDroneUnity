@@ -251,8 +251,19 @@ MonoBehaviour:
   timeReturnText: {fileID: 130155423}
   statusText: {fileID: 2133504470}
   leaderText: {fileID: 1297197633}
+  objectText: {fileID: 1859428749}
   leaderColor: {r: 1, g: 0, b: 0, a: 1}
   memberColor: {r: 0, g: 1, b: 1, a: 1}
+  playButton: {fileID: 831119274}
+  playButtonImage: {fileID: 831119275}
+  playIdleColor: {r: 0.007843138, g: 0.9607843, b: 0.011764706, a: 1}
+  resetButton: {fileID: 1459279013}
+  resetButtonImage: {fileID: 1459279014}
+  resetIdleColor: {r: 0, g: 0, b: 1, a: 1}
+  randomButton: {fileID: 306617759}
+  randomButtonImage: {fileID: 306617760}
+  randomIdleColor: {r: 1, g: 0.92, b: 0.016, a: 1}
+  pressedColor: {r: 0.6, g: 0.6, b: 0.6, a: 1}
 --- !u!4 &22667979
 Transform:
   m_ObjectHideFlags: 0
@@ -543,7 +554,7 @@ MonoBehaviour:
   baseMoveSpeed: 2
   maxMoveSpeed: 3.5
   avoidanceRadius: 0.3
-  wallCheckDistance: 0.8
+  wallCheckDistance: 0.7
   avoidanceWeight: 1
   randomJitterStrength: 0.4
   minMoveDistance: 0.25
@@ -559,8 +570,11 @@ MonoBehaviour:
   rSensorBack: {fileID: 0}
   rSensorLeft: {fileID: 0}
   explorationCenter: {fileID: 0}
-  centerBiasDistance: 1.2
+  centerBiasDistance: 3
   centerBiasStrength: 1.2
+  edgeNearDistance: 1
+  edgeTimeThreshold: 2
+  edgeCenterPushStrength: 2.5
   camera360: {fileID: 0}
   positionSensor: {fileID: 0}
 --- !u!58 &157097188
@@ -2495,6 +2509,7 @@ RectTransform:
   - {fileID: 2133504472}
   - {fileID: 130155422}
   - {fileID: 1297197632}
+  - {fileID: 1859428748}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0}
@@ -3134,7 +3149,7 @@ MonoBehaviour:
   baseMoveSpeed: 2
   maxMoveSpeed: 3.5
   avoidanceRadius: 0.3
-  wallCheckDistance: 0.8
+  wallCheckDistance: 0.7
   avoidanceWeight: 1
   randomJitterStrength: 0.4
   minMoveDistance: 0.25
@@ -3150,8 +3165,11 @@ MonoBehaviour:
   rSensorBack: {fileID: 0}
   rSensorLeft: {fileID: 0}
   explorationCenter: {fileID: 0}
-  centerBiasDistance: 1.2
+  centerBiasDistance: 3
   centerBiasStrength: 1.2
+  edgeNearDistance: 1
+  edgeTimeThreshold: 2
+  edgeCenterPushStrength: 2.5
   camera360: {fileID: 0}
   positionSensor: {fileID: 0}
 --- !u!58 &1193971010
@@ -3984,7 +4002,7 @@ MonoBehaviour:
       m_Calls:
       - m_Target: {fileID: 22667978}
         m_TargetAssemblyTypeName: SimManager, Assembly-CSharp
-        m_MethodName: ResetSim
+        m_MethodName: ResetButton
         m_Mode: 1
         m_Arguments:
           m_ObjectArgument: {fileID: 0}
@@ -5144,6 +5162,142 @@ SpriteRenderer:
   m_WasSpriteAssigned: 1
   m_MaskInteraction: 0
   m_SpriteSortPoint: 0
+--- !u!1 &1859428747
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1859428748}
+  - component: {fileID: 1859428750}
+  - component: {fileID: 1859428749}
+  m_Layer: 5
+  m_Name: ObjectText
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!224 &1859428748
+RectTransform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1859428747}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1079685252}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+  m_AnchorMin: {x: 0.5, y: 0.5}
+  m_AnchorMax: {x: 0.5, y: 0.5}
+  m_AnchoredPosition: {x: 400, y: -249}
+  m_SizeDelta: {x: 200, y: 50}
+  m_Pivot: {x: 0.5, y: 0.5}
+--- !u!114 &1859428749
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1859428747}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f4688fdb7df04437aeb418b961361dc5, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Unity.TextMeshPro::TMPro.TextMeshProUGUI
+  m_Material: {fileID: 0}
+  m_Color: {r: 1, g: 1, b: 1, a: 1}
+  m_RaycastTarget: 1
+  m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
+  m_Maskable: 1
+  m_OnCullStateChanged:
+    m_PersistentCalls:
+      m_Calls: []
+  m_text: 'Object  : None'
+  m_isRightToLeft: 0
+  m_fontAsset: {fileID: 11400000, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
+  m_sharedMaterial: {fileID: 2180264, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
+  m_fontSharedMaterials: []
+  m_fontMaterial: {fileID: 0}
+  m_fontMaterials: []
+  m_fontColor32:
+    serializedVersion: 2
+    rgba: 4294967295
+  m_fontColor: {r: 1, g: 1, b: 1, a: 1}
+  m_enableVertexGradient: 0
+  m_colorMode: 3
+  m_fontColorGradient:
+    topLeft: {r: 1, g: 1, b: 1, a: 1}
+    topRight: {r: 1, g: 1, b: 1, a: 1}
+    bottomLeft: {r: 1, g: 1, b: 1, a: 1}
+    bottomRight: {r: 1, g: 1, b: 1, a: 1}
+  m_fontColorGradientPreset: {fileID: 0}
+  m_spriteAsset: {fileID: 0}
+  m_tintAllSprites: 0
+  m_StyleSheet: {fileID: 0}
+  m_TextStyleHashCode: -1183493901
+  m_overrideHtmlColors: 0
+  m_faceColor:
+    serializedVersion: 2
+    rgba: 4294967295
+  m_fontSize: 25
+  m_fontSizeBase: 25
+  m_fontWeight: 400
+  m_enableAutoSizing: 0
+  m_fontSizeMin: 18
+  m_fontSizeMax: 72
+  m_fontStyle: 0
+  m_HorizontalAlignment: 1
+  m_VerticalAlignment: 256
+  m_textAlignment: 65535
+  m_characterSpacing: 0
+  m_wordSpacing: 0
+  m_lineSpacing: 0
+  m_lineSpacingMax: 0
+  m_paragraphSpacing: 0
+  m_charWidthMaxAdj: 0
+  m_TextWrappingMode: 1
+  m_wordWrappingRatios: 0.4
+  m_overflowMode: 0
+  m_linkedTextComponent: {fileID: 0}
+  parentLinkedComponent: {fileID: 0}
+  m_enableKerning: 0
+  m_ActiveFontFeatures: 6e72656b
+  m_enableExtraPadding: 0
+  checkPaddingRequired: 0
+  m_isRichText: 1
+  m_EmojiFallbackSupport: 1
+  m_parseCtrlCharacters: 1
+  m_isOrthographic: 1
+  m_isCullingEnabled: 0
+  m_horizontalMapping: 0
+  m_verticalMapping: 0
+  m_uvLineOffset: 0
+  m_geometrySortingOrder: 0
+  m_IsTextObjectScaleStatic: 0
+  m_VertexBufferAutoSizeReduction: 0
+  m_useMaxVisibleDescender: 1
+  m_pageToDisplay: 1
+  m_margin: {x: 0, y: 0, z: 0, w: 0}
+  m_isUsingLegacyAnimationComponent: 0
+  m_isVolumetricText: 0
+  m_hasFontAssetChanged: 0
+  m_baseMaterial: {fileID: 0}
+  m_maskOffset: {x: 0, y: 0, z: 0, w: 0}
+--- !u!222 &1859428750
+CanvasRenderer:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1859428747}
+  m_CullTransparentMesh: 1
 --- !u!1 &1861793808
 GameObject:
   m_ObjectHideFlags: 0
@@ -5483,7 +5637,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: 'Status  : Not Run
+  m_text: 'Simulation Not Run
 
 '
   m_isRightToLeft: 0
@@ -5580,7 +5734,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: 400, y: -239}
+  m_AnchoredPosition: {x: -445, y: -320}
   m_SizeDelta: {x: 200, y: 50}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!1 &2142304128
@@ -5632,7 +5786,7 @@ MonoBehaviour:
   baseMoveSpeed: 2
   maxMoveSpeed: 3.5
   avoidanceRadius: 0.3
-  wallCheckDistance: 0.8
+  wallCheckDistance: 0.7
   avoidanceWeight: 1
   randomJitterStrength: 0.4
   minMoveDistance: 0.25
@@ -5648,8 +5802,11 @@ MonoBehaviour:
   rSensorBack: {fileID: 0}
   rSensorLeft: {fileID: 0}
   explorationCenter: {fileID: 0}
-  centerBiasDistance: 1.2
+  centerBiasDistance: 3
   centerBiasStrength: 1.2
+  edgeNearDistance: 1
+  edgeTimeThreshold: 2
+  edgeCenterPushStrength: 2.5
   camera360: {fileID: 0}
   positionSensor: {fileID: 0}
 --- !u!58 &2142304130

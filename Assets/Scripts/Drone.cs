@@ -394,11 +394,10 @@ public class Drone : MonoBehaviour
             }
 
             // Anti-stuck khusus saat pulang
-            float moved = (pos - lastPos).magnitude / Time.fixedDeltaTime;
-            stuckTimer = moved < minMoveDistance ? stuckTimer + Time.fixedDeltaTime : 0f;
+            float movedHome = (pos - lastPos).magnitude / Time.fixedDeltaTime;
+            stuckTimer = movedHome < minMoveDistance ? stuckTimer + Time.fixedDeltaTime : 0f;
             if (stuckTimer > stuckTimeThreshold)
             {
-                // Arah baru: masih mengarah ke home tapi dengan jitter
                 Vector2 rand = Random.insideUnitCircle.normalized;
                 currentDir = (toHome.normalized + rand * 0.7f).normalized;
                 stuckTimer = 0f;
@@ -568,36 +567,32 @@ public class Drone : MonoBehaviour
         bool rVery = dRight < veryNear;
 
         // ---------- LOGIKA SUDUT / DEAD-END ----------
-        // Dead-end / pojok sempit: depan + kiri + kanan dekat
         if (fNear && lNear && rNear)
         {
-            steer += back * 2.5f;        // mundur kuat
+            steer += back * 2.5f;        // dead-end → mundur kuat
         }
-        // Sudut kiri: depan & kiri dekat, kanan lebih longgar
         else if (fNear && lNear && dRight > dLeft)
         {
-            steer += right * 1.8f;       // belok kanan
+            steer += right * 1.8f;       // sudut kiri → belok kanan
         }
-        // Sudut kanan: depan & kanan dekat, kiri lebih longgar
         else if (fNear && rNear && dLeft > dRight)
         {
-            steer += left * 1.8f;        // belok kiri
+            steer += left * 1.8f;        // sudut kanan → belok kiri
         }
-        // Depan sangat dekat → mundur sedikit
         else if (fVery)
         {
-            steer += back * 1.5f;
+            steer += back * 1.5f;        // depan sangat dekat → mundur
         }
 
-        // Kalau kiri dekat → dorong sedikit ke kanan
+        // Kiri dekat → dorong kanan
         if (lNear && !rNear)
             steer += right * 0.8f;
 
-        // Kalau kanan dekat → dorong sedikit ke kiri
+        // Kanan dekat → dorong kiri
         if (rNear && !lNear)
             steer += left * 0.8f;
 
-        // Kalau belakang terlalu dekat → sedikit maju
+        // Belakang dekat → dorong sedikit maju
         if (bNear && !fNear)
             steer += forward * 0.5f;
 

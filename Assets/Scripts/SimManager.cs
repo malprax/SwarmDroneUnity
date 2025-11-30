@@ -18,19 +18,27 @@ public class SimManager : MonoBehaviour
     public TMP_Text statusText;
     public TMP_Text leaderText;
 
+    [Header("UI Object Info")]
+    public TMP_Text objectText;   // Text "Object : Room X"
+
     [Header("Role Colors")]
     public Color leaderColor = Color.red;
     public Color memberColor = Color.cyan;
 
     [Header("Buttons")]
+    public Button playButton;
+    public Image playButtonImage;
+    public Color playIdleColor = new Color(1f, 0.92f, 0.016f); // kuning
+
+    public Button resetButton;
+    public Image resetButtonImage;
+    public Color resetIdleColor = Color.blue;                   // biru
+
     public Button randomButton;
     public Image randomButtonImage;
+    public Color randomIdleColor = new Color(1f, 0.92f, 0.016f); // kuning
 
-    [Tooltip("Warna tombol Random saat idle (kuning).")]
-    public Color randomIdleColor = new Color(1f, 0.92f, 0.016f); // kuning emas
-
-    [Tooltip("Warna tombol Random saat ditekan (abu-abu).")]
-    public Color randomPressedColor = new Color(0.6f, 0.6f, 0.6f); // abu-abu
+    public Color pressedColor = new Color(0.6f, 0.6f, 0.6f); // abu-abu
 
     // ======= TIMER STATE =======
     bool searchingPhase;
@@ -42,37 +50,97 @@ public class SimManager : MonoBehaviour
 
     void Start()
     {
+        // --- AUTO-DETECT objectText kalau belum diassign di Inspector ---
+        if (objectText == null)
+        {
+            // cari semua TMP_Text dan ambil yang mengandung "Object"
+            TMP_Text[] texts = FindObjectsOfType<TMP_Text>();
+            foreach (var t in texts)
+            {
+                if (t.text.Contains("Object"))
+                {
+                    objectText = t;
+                    Debug.Log($"[SimManager] Auto-linked objectText to '{t.gameObject.name}'");
+                    break;
+                }
+            }
+        }
+
+        AssignDroneNames();
         InitRoles();
         ResetSimulationState();
 
-        // Pastikan warna awal tombol Random = idle color
-        if (randomButtonImage != null)
-            randomButtonImage.color = randomIdleColor;
+        if (playButtonImage  != null) playButtonImage.color  = playIdleColor;
+        if (resetButtonImage != null) resetButtonImage.color = resetIdleColor;
+        if (randomButtonImage!= null) randomButtonImage.color= randomIdleColor;
+
+        if (objectText != null)
+            objectText.text = "Object : None";
     }
 
     // =========================================================
-    //  DIPANGGIL DARI TOMBOL UI
+    //  BUTTON EVENTS
     // =========================================================
 
     public void Play()
     {
+        StartCoroutine(PlayButtonRoutine());
+    }
+
+    IEnumerator PlayButtonRoutine()
+    {
+        if (playButtonImage) playButtonImage.color = pressedColor;
+        yield return null;
+
+        // Reset dulu waktu & posisi drone
         ResetSimulationState();
 
+        // --- PILIH / ACAK ROOM UNTUK TARGET ---
+        if (targetObject != null && targetSpawns != null && targetSpawns.Length > 0)
+        {
+            int spawnIdx = Random.Range(0, targetSpawns.Length);
+            targetObject.position = targetSpawns[spawnIdx].position;
+        }
+
+        // Update label Object : Room X
+        UpdateObjectRoomName();
+
+        // Mulai fase searching
         searchingPhase = true;
         targetFound = false;
         returnPhase = false;
 
-        if (statusText != null)
+        if (statusText)
             statusText.text = "Searching...";
 
         foreach (var d in drones)
             if (d != null)
                 d.StartSearch();
+
+        InitRoles();
+
+        yield return new WaitForSeconds(0.15f);
+        if (playButtonImage) playButtonImage.color = playIdleColor;
     }
 
     public void ResetButton()
     {
+        StartCoroutine(ResetButtonRoutine());
+    }
+
+    IEnumerator ResetButtonRoutine()
+    {
+        if (resetButtonImage) resetButtonImage.color = pressedColor;
+        yield return null;
+
         ResetSimulationState();
+        InitRoles();
+
+        if (objectText != null)
+            objectText.text = "Object : None";
+
+        yield return new WaitForSeconds(0.15f);
+        if (resetButtonImage) resetButtonImage.color = resetIdleColor;
     }
 
     public void RandomButton()
@@ -80,33 +148,26 @@ public class SimManager : MonoBehaviour
         StartCoroutine(RandomButtonRoutine());
     }
 
-    // Coroutine untuk efek warna tombol Random
-    private IEnumerator RandomButtonRoutine()
+    IEnumerator RandomButtonRoutine()
     {
-        // Ubah warna jadi abu-abu saat ditekan
-        if (randomButtonImage != null)
-            randomButtonImage.color = randomPressedColor;
-
-        // Tunggu 1 frame (biar UI sempat redraw)
+        if (randomButtonImage) randomButtonImage.color = pressedColor;
         yield return null;
 
-        // Jalankan logika random
         DoRandom();
 
-        // Delay kecil supaya efek "tekan" kelihatan
         yield return new WaitForSeconds(0.15f);
-
-        // Kembali ke warna kuning
-        if (randomButtonImage != null)
-            randomButtonImage.color = randomIdleColor;
+        if (randomButtonImage) randomButtonImage.color = randomIdleColor;
     }
 
     void DoRandom()
     {
+        // Reset waktu & posisi drone
+        ResetSimulationState();
+
         // Random leader
         if (drones != null && drones.Length > 0)
         {
-            int idx = UnityEngine.Random.Range(0, drones.Length);
+            int idx = Random.Range(0, drones.Length);
             for (int i = 0; i < drones.Length; i++)
             {
                 if (drones[i] == null) continue;
@@ -119,12 +180,12 @@ public class SimManager : MonoBehaviour
         // Random posisi target
         if (targetObject != null && targetSpawns != null && targetSpawns.Length > 0)
         {
-            int spawnIdx = UnityEngine.Random.Range(0, targetSpawns.Length);
+            int spawnIdx = Random.Range(0, targetSpawns.Length);
             targetObject.position = targetSpawns[spawnIdx].position;
         }
 
-        // Reset waktu & posisi drone ke home
-        ResetSimulationState();
+        // Update label Object : Room X
+        UpdateObjectRoomName();
     }
 
     // =========================================================
@@ -148,13 +209,13 @@ public class SimManager : MonoBehaviour
 
     void UpdateTimerUI()
     {
-        if (timeFoundText != null)
-            timeFoundText.text = $"Found: {foundTimer:0.0} s";
+        if (timeFoundText)
+            timeFoundText.text = $"Found : {foundTimer:0.0}s";
 
-        if (timeReturnText != null)
+        if (timeReturnText)
         {
             float shown = returnPhase ? returnTimer : 0f;
-            timeReturnText.text = $"Return: {shown:0.0} s";
+            timeReturnText.text = $"Return : {shown:0.0}s";
         }
     }
 
@@ -173,7 +234,7 @@ public class SimManager : MonoBehaviour
 
         UpdateTimerUI();
 
-        if (statusText != null)
+        if (statusText)
             statusText.text = "Press Play to start.";
     }
 
@@ -181,10 +242,22 @@ public class SimManager : MonoBehaviour
     //  ROLE / LEADER
     // =========================================================
 
+    void AssignDroneNames()
+    {
+        for (int i = 0; i < drones.Length; i++)
+        {
+            if (drones[i] != null)
+                drones[i].droneName = $"Drone {i + 1}";
+        }
+    }
+
     void InitRoles()
     {
         if (drones == null || drones.Length == 0)
+        {
+            if (leaderText) leaderText.text = "Leader : None";
             return;
+        }
 
         int leaderIndex = -1;
 
@@ -209,8 +282,49 @@ public class SimManager : MonoBehaviour
             drones[i].ApplyRoleVisual(leaderColor, memberColor);
         }
 
-        if (leaderText != null && drones[leaderIndex] != null)
-            leaderText.text = $"Leader: {drones[leaderIndex].droneName}";
+        if (leaderText != null)
+            leaderText.text = $"Leader : Drone {leaderIndex + 1}";
+    }
+
+    // =========================================================
+    //  OBJECT ROOM LABEL
+    // =========================================================
+
+    void UpdateObjectRoomName()
+    {
+        if (objectText == null || targetObject == null || targetSpawns == null || targetSpawns.Length == 0)
+        {
+            if (objectText != null)
+                objectText.text = "Object : None";
+            Debug.LogWarning("[SimManager] UpdateObjectRoomName skipped (missing reference).");
+            return;
+        }
+
+        int closestIndex = -1;
+        float bestDist = Mathf.Infinity;
+        Vector3 pos = targetObject.position;
+
+        for (int i = 0; i < targetSpawns.Length; i++)
+        {
+            if (targetSpawns[i] == null) continue;
+
+            float d = Vector3.Distance(pos, targetSpawns[i].position);
+            if (d < bestDist)
+            {
+                bestDist = d;
+                closestIndex = i;
+            }
+        }
+
+        if (closestIndex >= 0)
+        {
+            objectText.text = $"Object : Room {closestIndex + 1}";
+            Debug.Log($"[SimManager] Object now in Room {closestIndex + 1}");
+        }
+        else
+        {
+            objectText.text = "Object : None";
+        }
     }
 
     // =========================================================
