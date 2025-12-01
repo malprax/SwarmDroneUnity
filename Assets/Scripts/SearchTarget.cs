@@ -3,16 +3,35 @@ using UnityEngine;
 [RequireComponent(typeof(Collider2D))]
 public class SearchTarget : MonoBehaviour
 {
-    private SimManager manager;
     private Collider2D targetCollider;
+
+    [Header("Settings")]
+    [Tooltip("Jika aktif, collider otomatis di-set sebagai trigger saat Awake/Reset.")]
+    public bool autoSetTrigger = true;
 
     void Awake()
     {
-        manager = FindFirstObjectByType<SimManager>();
-        targetCollider = GetComponent<Collider2D>();
+        EnsureTriggerCollider();
+    }
 
-        // Pastikan collider jadi trigger supaya tidak tabrakan fisik
-        if (targetCollider != null && !targetCollider.isTrigger)
+    // Kalau komponen baru di-add di Inspector, Unity akan panggil Reset()
+    void Reset()
+    {
+        EnsureTriggerCollider();
+    }
+
+    /// <summary>
+    /// Pastikan collider adalah trigger sehingga drone bisa melewati
+    /// tanpa tabrakan fisik, hanya memicu event trigger.
+    /// </summary>
+    void EnsureTriggerCollider()
+    {
+        if (targetCollider == null)
+            targetCollider = GetComponent<Collider2D>();
+
+        if (targetCollider == null) return;
+
+        if (autoSetTrigger && !targetCollider.isTrigger)
         {
             targetCollider.isTrigger = true;
 #if UNITY_EDITOR
@@ -21,23 +40,10 @@ public class SearchTarget : MonoBehaviour
         }
     }
 
-    void OnTriggerEnter2D(Collider2D other)
-    {
-        if (manager == null) return;
-
-        // Hanya respons ke Drone
-        Drone d = other.GetComponent<Drone>();
-        if (d == null) return;
-
-        // Hanya kalau drone masih fase searching
-        if (d.IsSearching)
-        {
-            manager.OnDroneFoundTarget(d);
-        }
-    }
-
+    // ---------------------------------------------------------
+    //  GIZMOS: Biar kelihatan radius/shape collider di Scene View
+    // ---------------------------------------------------------
 #if UNITY_EDITOR
-    // Biar kelihatan radius collider di Scene view
     void OnDrawGizmos()
     {
         var col = GetComponent<Collider2D>();
@@ -48,12 +54,27 @@ public class SearchTarget : MonoBehaviour
         if (col is CircleCollider2D c)
         {
             float r = c.radius * Mathf.Max(transform.lossyScale.x, transform.lossyScale.y);
-            Gizmos.DrawWireSphere(transform.position + (Vector3)c.offset, r);
+            Vector3 center = transform.position + (Vector3)c.offset;
+            Gizmos.DrawWireSphere(center, r);
         }
         else if (col is BoxCollider2D b)
         {
             Gizmos.matrix = transform.localToWorldMatrix;
             Gizmos.DrawWireCube(b.offset, b.size);
+        }
+        else if (col is PolygonCollider2D p)
+        {
+            Gizmos.matrix = transform.localToWorldMatrix;
+            var points = p.points;
+            if (points.Length > 1)
+            {
+                for (int i = 0; i < points.Length; i++)
+                {
+                    Vector3 a = points[i];
+                    Vector3 bPt = points[(i + 1) % points.Length];
+                    Gizmos.DrawLine(a, bPt);
+                }
+            }
         }
     }
 #endif
