@@ -283,7 +283,12 @@ public class Drone : MonoBehaviour
         atHome = true;
 
         transform.position = homePosition;
+
+#if UNITY_6000_0_OR_NEWER
         rb.linearVelocity = Vector2.zero;
+#else
+        rb.velocity = Vector2.zero;
+#endif
 
         currentDir = Vector2.zero;
         stuckTimer = 0f;
@@ -313,12 +318,20 @@ public class Drone : MonoBehaviour
 
     void FixedUpdate()
     {
+        // Safety: kalau manager belum ketemu (mis. scene baru di-load)
+        if (manager == null)
+            manager = FindFirstObjectByType<SimManager>();
+
         Vector2 pos = rb.position;
 
         // Tidak ada misi
         if (!searching && !returningHome)
         {
+#if UNITY_6000_0_OR_NEWER
             rb.linearVelocity = Vector2.zero;
+#else
+            rb.velocity = Vector2.zero;
+#endif
             throttle = Mathf.MoveTowards(throttle, 0f, throttleResponse * Time.fixedDeltaTime);
             UpdateVisual(Vector2.zero);
             return;
@@ -342,7 +355,11 @@ public class Drone : MonoBehaviour
                 searching = false;
                 atHome = true;
 
+#if UNITY_6000_0_OR_NEWER
                 rb.linearVelocity = Vector2.zero;
+#else
+                rb.velocity = Vector2.zero;
+#endif
                 throttle = 0f;
 
                 manager?.OnDroneReachedHome(this);
@@ -521,7 +538,12 @@ public class Drone : MonoBehaviour
 
         float speed = Mathf.Lerp(0f, maxMoveSpeed, effectiveThrottle);
         Vector2 vel = desiredDir * speed;
+
+#if UNITY_6000_0_OR_NEWER
         rb.linearVelocity = vel;
+#else
+        rb.velocity = vel;
+#endif
 
         lastPos = rb.position;
 
