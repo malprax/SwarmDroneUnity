@@ -31,3 +31,18 @@ public class RangeSensor2D : MonoBehaviour
         }
     }
 }
+
+// 1. tutup mesin
+// 2. Rubber Nozzle
+// 3. Nozzle
+// 4. Selang 
+// 5. Safety Propeller
+// 6. Connecter Selang
+// 7. Tangki Plastik
+// 8. Tray baterai
+// 9. Klem pipa kaki drone
+// 10. kabel brushless motor
+// 11. Rubber kaki drone
+// 12 safety brushless
+// 13. kaki drone
+// 14. plastik knob baterai
