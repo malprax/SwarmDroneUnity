@@ -2905,6 +2905,11 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7b38d019e779441859f0382000bd09f9, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Drone
+  camera360: {fileID: 638663580}
+  visionRange: 3
+  targetLayer:
+    serializedVersion: 2
+    m_Bits: 64
   isLeader: 0
   droneName: Drone
   ledMarker: {fileID: 0}
@@ -2943,7 +2948,7 @@ MonoBehaviour:
   edgeNearDistance: 1
   edgeTimeThreshold: 2
   edgeCenterPushStrength: 2.5
-  camera360: {fileID: 0}
+  camera360Sensor: {fileID: 0}
   positionSensor: {fileID: 0}
 --- !u!58 &1193971010
 CircleCollider2D:
@@ -2980,7 +2985,7 @@ CircleCollider2D:
   m_CompositeOperation: 0
   m_CompositeOrder: 0
   m_Offset: {x: 0, y: 0}
-  m_Radius: 2.5
+  m_Radius: 4
 --- !u!50 &1193971011
 Rigidbody2D:
   serializedVersion: 5
@@ -3063,7 +3068,7 @@ CircleCollider2D:
   m_CompositeOperation: 0
   m_CompositeOrder: 0
   m_Offset: {x: 0, y: 0}
-  m_Radius: 4
+  m_Radius: 5
 --- !u!1 &1203118737
 GameObject:
   m_ObjectHideFlags: 0

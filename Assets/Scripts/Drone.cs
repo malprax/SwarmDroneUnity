@@ -4,9 +4,16 @@ using UnityEngine;
 public class Drone : MonoBehaviour
 {
     // =========================================================
+    //  360 CAMERA (EYES)
+    // =========================================================
+    [Header("360 Camera (Eyes)")]
+    public Transform camera360;      // drag child "Camera360" di Inspector
+    public float visionRange = 2.0f; // radius penglihatan
+    public LayerMask targetLayer;    // layer untuk SearchTarget (mis. layer "Target")
+
+    // =========================================================
     //  ROLE & LED MARKER
     // =========================================================
-
     [Header("Role")]
     public bool isLeader = false;
     public string droneName = "Drone";
@@ -17,7 +24,6 @@ public class Drone : MonoBehaviour
     // =========================================================
     //  VISUAL: BODY & PROPELLERS
     // =========================================================
-
     [Header("Body Visual (DroneBody)")]
     [Tooltip("Transform untuk body drone (child: DroneBody). Akan di-tilt & digetarkan.")]
     public Transform bodyTransform;
@@ -49,7 +55,6 @@ public class Drone : MonoBehaviour
     // =========================================================
     //  MOVEMENT & MOTOR
     // =========================================================
-
     [Header("Movement / Motor")]
     public float baseMoveSpeed = 2f;
     public float maxMoveSpeed = 3.5f;
@@ -76,7 +81,6 @@ public class Drone : MonoBehaviour
     // =========================================================
     //  RANGE SENSORS (RSensor1–4)
     // =========================================================
-
     [Header("Range Sensors")]
     public RangeSensor2D rSensorFront;
     public RangeSensor2D rSensorRight;
@@ -86,7 +90,6 @@ public class Drone : MonoBehaviour
     // =========================================================
     //  EXPLORATION BIAS (MENUJU TENGAH RUANGAN)
     // =========================================================
-
     [Header("Exploration / Center Bias")]
     [Tooltip("Titik tengah ruangan (Empty GameObject di tengah arena).")]
     public Transform explorationCenter;
@@ -100,7 +103,6 @@ public class Drone : MonoBehaviour
     // =========================================================
     //  BATAS MENYISIRI PINGGIR RUANGAN
     // =========================================================
-
     [Header("Edge-follow Limit (anti keliling pinggir terus)")]
     [Tooltip("Sensor dianggap dekat dinding jika jarak < nilai ini.")]
     public float edgeNearDistance = 1.0f;
@@ -115,13 +117,12 @@ public class Drone : MonoBehaviour
     bool edgeEscapeMode;
 
     // Optional sensors
-    public Camera360Sensor camera360;
+    public Camera360Sensor camera360Sensor; // tidak dipakai langsung, disiapkan kalau mau pakai script terpisah
     public PositionSensor positionSensor;
 
     // =========================================================
     //  INTERNAL DRONE STATE
     // =========================================================
-
     Rigidbody2D rb;
     SimManager manager;
 
@@ -149,7 +150,6 @@ public class Drone : MonoBehaviour
     // =========================================================
     //  INITIALIZATION
     // =========================================================
-
     void Awake()
     {
         rb = GetComponent<Rigidbody2D>();
@@ -189,9 +189,16 @@ public class Drone : MonoBehaviour
         // AUTO-DETECT RANGE SENSORS
         AutoDetectRangeSensors();
 
-        // Auto detect Camera 360
+        // Auto detect Camera360 (Transform)
         if (camera360 == null)
-            camera360 = GetComponentInChildren<Camera360Sensor>();
+        {
+            var cam = transform.Find("Camera360");
+            if (cam != null) camera360 = cam;
+        }
+
+        // Optional: auto detect Camera360Sensor kalau ada
+        if (camera360Sensor == null)
+            camera360Sensor = GetComponentInChildren<Camera360Sensor>();
     }
 
     void AutoDetectRangeSensors()
@@ -251,7 +258,6 @@ public class Drone : MonoBehaviour
     // =========================================================
     //  ROLE VISUAL
     // =========================================================
-
     public void ApplyRoleVisual(Color leaderColor, Color memberColor)
     {
         if (ledMarker != null)
@@ -261,7 +267,6 @@ public class Drone : MonoBehaviour
     // =========================================================
     //  COMMANDS CALLED BY SIMMANAGER
     // =========================================================
-
     public void StartSearch()
     {
         searching = true;
@@ -315,7 +320,6 @@ public class Drone : MonoBehaviour
     // =========================================================
     //  MAIN PHYSICS LOOP
     // =========================================================
-
     void FixedUpdate()
     {
         // Safety: kalau manager belum ketemu (mis. scene baru di-load)
@@ -340,7 +344,7 @@ public class Drone : MonoBehaviour
         Vector2 desiredDir;
 
         // ===========================================
-        //  RETURN HOME MODE (dengan sensor + backoff)
+        //  RETURN HOME MODE
         // ===========================================
         if (returningHome)
         {
@@ -348,8 +352,8 @@ public class Drone : MonoBehaviour
             Vector2 toHome = home - pos;
             float dist = toHome.magnitude;
 
-            // Sudah sampai Home Base
-            if (dist < 0.05f)
+            // Sudah sampai Home Base (sedikit dilonggarkan)
+            if (dist < 0.12f)
             {
                 returningHome = false;
                 searching = false;
@@ -373,42 +377,19 @@ public class Drone : MonoBehaviour
             float dBack  = GetSensorDistance(rSensorBack);
             float dLeft  = GetSensorDistance(rSensorLeft);
 
-            // Kalau depan sangat dekat → backoff
-            if (dFront < frontVeryNearDistance)
-                backOffTimer = backOffDuration;
-
+            // Catatan: untuk mode pulang kita TIDAK pakai backOff agresif,
+            // supaya drone tidak maju-mundur di koridor sempit.
             Vector2 avoidance = ComputeAvoidance(pos);
 
-            if (backOffTimer > 0f)
-            {
-                // Mode mundur saat pulang
-                backOffTimer -= Time.fixedDeltaTime;
+            Vector2 sensorSteer = ComputeSensorSteer(
+                dFront, dRight, dBack, dLeft,
+                toHome,
+                false  // tidak perlu centerBias ketika pulang
+            );
 
-                desiredDir = -toHome.normalized;
-
-                // geser sedikit kiri/kanan agar bisa putar di tikungan
-                if (dLeft < dRight)
-                    desiredDir += (Vector2)transform.right * 0.4f;   // geser kanan
-                else
-                    desiredDir -= (Vector2)transform.right * 0.4f;   // geser kiri
-
-                desiredDir = (desiredDir + avoidance * avoidanceWeight).normalized;
-                if (desiredDir == Vector2.zero)
-                    desiredDir = -toHome.normalized;
-            }
-            else
-            {
-                // Steering dinding (tanpa center-bias)
-                Vector2 sensorSteer = ComputeSensorSteer(
-                    dFront, dRight, dBack, dLeft,
-                    toHome,
-                    false         // <-- tidak tarik ke center saat pulang
-                );
-
-                desiredDir = (toHome.normalized + sensorSteer + avoidance * avoidanceWeight).normalized;
-                if (desiredDir == Vector2.zero)
-                    desiredDir = toHome.normalized;
-            }
+            desiredDir = (toHome.normalized + sensorSteer + avoidance * avoidanceWeight).normalized;
+            if (desiredDir == Vector2.zero)
+                desiredDir = toHome.normalized;
 
             // Anti-stuck khusus saat pulang
             float movedHome = (pos - lastPos).magnitude / Time.fixedDeltaTime;
@@ -422,23 +403,23 @@ public class Drone : MonoBehaviour
             }
         }
         // ===========================================
-        //  SEARCH MODE (sudut + backoff + center-bias + anti pinggir)
+        //  SEARCH MODE
         // ===========================================
         else
         {
             if (currentDir == Vector2.zero)
                 currentDir = Random.insideUnitCircle.normalized;
 
-            // Noise motor → drone tidak terlalu lurus
+            // Noise motor
             currentDir = (currentDir + Random.insideUnitCircle * randomJitterStrength * Time.fixedDeltaTime).normalized;
 
-            // Baca semua sensor
+            // Baca sensor
             float dFront = GetSensorDistance(rSensorFront);
             float dRight = GetSensorDistance(rSensorRight);
             float dBack  = GetSensorDistance(rSensorBack);
             float dLeft  = GetSensorDistance(rSensorLeft);
 
-            // Kalau depan sangat dekat → aktifkan mode backoff
+            // Kalau depan sangat dekat → backoff
             if (dFront < frontVeryNearDistance)
                 backOffTimer = backOffDuration;
 
@@ -446,11 +427,10 @@ public class Drone : MonoBehaviour
 
             if (backOffTimer > 0f)
             {
-                // Mode mundur: paksa arah berlawanan currentDir
+                // Mode mundur
                 backOffTimer -= Time.fixedDeltaTime;
                 desiredDir = -currentDir;
 
-                // geser sedikit berdasarkan kiri/kanan supaya tidak mundur lurus ke pojok
                 if (dLeft < dRight)
                     desiredDir += (Vector2)transform.right * 0.4f; // geser kanan
                 else
@@ -462,7 +442,7 @@ public class Drone : MonoBehaviour
             }
             else
             {
-                // ----- DETEKSI DRONE TERLALU LAMA DI PINGGIR (1 sensor saja yang dekat) -----
+                // ----- DETEKSI TERLALU LAMA DI PINGGIR -----
                 int sideNearCount = 0;
                 if (dFront < edgeNearDistance) sideNearCount++;
                 if (dRight < edgeNearDistance) sideNearCount++;
@@ -483,7 +463,7 @@ public class Drone : MonoBehaviour
                     edgeEscapeMode = false;
                 }
 
-                // Steering tambahan dari sensor (corner + center bias biasa, kalau tidak edgeEscape)
+                // Steering sensor
                 bool useCenterBias = !edgeEscapeMode;
 
                 Vector2 sensorSteer = ComputeSensorSteer(
@@ -492,7 +472,7 @@ public class Drone : MonoBehaviour
                     useCenterBias
                 );
 
-                // Dorong kuat ke tengah ruangan jika terlalu lama di pinggir
+                // Dorong kuat ke tengah jika edgeEscape aktif
                 Vector2 centerPush = Vector2.zero;
                 if (edgeEscapeMode && explorationCenter != null)
                 {
@@ -501,13 +481,12 @@ public class Drone : MonoBehaviour
                         centerPush = toCenter.normalized * edgeCenterPushStrength;
                 }
 
-                // Gabungkan arah utama + sensor + (opsional) dorong ke tengah + avoidance
                 desiredDir = (currentDir + sensorSteer + centerPush + avoidance * avoidanceWeight).normalized;
                 if (desiredDir == Vector2.zero)
                     desiredDir = currentDir;
             }
 
-            // ANTI STUCK saat eksplorasi
+            // ANTI STUCK eksplorasi
             float moved = (pos - lastPos).magnitude / Time.fixedDeltaTime;
             stuckTimer = moved < minMoveDistance ? stuckTimer + Time.fixedDeltaTime : 0f;
 
@@ -519,14 +498,17 @@ public class Drone : MonoBehaviour
                 edgeNearTimer = 0f;
                 edgeEscapeMode = false;
             }
+
+            // --- MATA 360: cek target di sekitar kamera ---
+            ScanWithCamera360();
         }
 
         // Anti lengket di tembok
         desiredDir = AvoidWallSlide(desiredDir, pos);
 
-        // ===========================================
+        // ===================================================
         //  PWM MOTOR & KECEPATAN
-        // ===========================================
+        // ===================================================
         float congestion = ComputeAvoidanceMagnitude(rb.position);
         float targetSpeed = Mathf.Lerp(maxMoveSpeed, baseMoveSpeed * 0.4f, congestion);
 
@@ -547,20 +529,59 @@ public class Drone : MonoBehaviour
 
         lastPos = rb.position;
 
-        // UPDATE VISUAL (tilt + vibration + propellers)
+        // UPDATE VISUAL
         UpdateVisual(vel);
     }
 
     // =========================================================
+    //  360 CAMERA SCAN
+    // =========================================================
+    void ScanWithCamera360()
+    {
+        if (!searching) return;
+        if (camera360 == null) return;
+        if (targetLayer == 0) return; // belum diset
+
+        Collider2D hit = Physics2D.OverlapCircle(
+            camera360.position,
+            visionRange,
+            targetLayer
+        );
+
+        if (hit == null) return;
+
+        SearchTarget target = hit.GetComponent<SearchTarget>();
+        if (target == null) return;
+
+        // Drone menemukan target dengan kamera
+        manager?.OnDroneFoundTarget(this);
+    }
+
+#if UNITY_EDITOR
+    void OnDrawGizmosSelected()
+    {
+        if (camera360 == null)
+        {
+            var cam = transform.Find("Camera360");
+            if (cam != null) camera360 = cam;
+        }
+
+        if (camera360 != null)
+        {
+            Gizmos.color = new Color(0f, 1f, 1f, 0.4f);
+            Gizmos.DrawWireSphere(camera360.position, visionRange);
+        }
+    }
+#endif
+
+    // =========================================================
     //  SENSOR UTILITIES
     // =========================================================
-
     float GetSensorDistance(RangeSensor2D sensor)
     {
         return sensor ? sensor.distance : Mathf.Infinity;
     }
 
-    // SENSOR-BASED STEERING (logika sudut ruangan + optional center bias)
     Vector2 ComputeSensorSteer(
         float dFront, float dRight, float dBack, float dLeft,
         Vector2 baseDir,
@@ -588,37 +609,34 @@ public class Drone : MonoBehaviour
         bool lVery = dLeft  < veryNear;
         bool rVery = dRight < veryNear;
 
-        // ---------- LOGIKA SUDUT / DEAD-END ----------
+        // Sudut / dead-end
         if (fNear && lNear && rNear)
         {
-            steer += back * 2.5f;        // dead-end → mundur kuat
+            steer += back * 2.5f;
         }
         else if (fNear && lNear && dRight > dLeft)
         {
-            steer += right * 1.8f;       // sudut kiri → belok kanan
+            steer += right * 1.8f;
         }
         else if (fNear && rNear && dLeft > dRight)
         {
-            steer += left * 1.8f;        // sudut kanan → belok kiri
+            steer += left * 1.8f;
         }
         else if (fVery)
         {
-            steer += back * 1.5f;        // depan sangat dekat → mundur
+            steer += back * 1.5f;
         }
 
-        // Kiri dekat → dorong kanan
         if (lNear && !rNear)
             steer += right * 0.8f;
 
-        // Kanan dekat → dorong kiri
         if (rNear && !lNear)
             steer += left * 0.8f;
 
-        // Belakang dekat → dorong sedikit maju
         if (bNear && !fNear)
             steer += forward * 0.5f;
 
-        // ---------- BIAS KE TENGAH RUANGAN (mode eksplorasi normal) ----------
+        // Bias ke tengah ruangan
         if (useCenterBias && explorationCenter != null)
         {
             bool allFar =
@@ -641,7 +659,6 @@ public class Drone : MonoBehaviour
     // =========================================================
     //  AVOIDANCE & WALL SLIDE
     // =========================================================
-
     Vector2 ComputeAvoidance(Vector2 pos)
     {
         Vector2 avoidance = Vector2.zero;
@@ -672,7 +689,6 @@ public class Drone : MonoBehaviour
         return Mathf.Clamp01(sum / 4f);
     }
 
-    // ---------- Luncur sepanjang dinding ----------
     Vector2 AvoidWallSlide(Vector2 desiredDir, Vector2 pos)
     {
         RaycastHit2D hit = Physics2D.Raycast(pos, desiredDir, wallCheckDistance, 1 << wallLayer);
@@ -691,23 +707,31 @@ public class Drone : MonoBehaviour
     {
         if (col.gameObject.layer != wallLayer) return;
 
-        // Dorong sedikit menjauh dari dinding supaya tidak lengket
         Vector2 normal = col.contacts[0].normal;
         transform.position += (Vector3)(normal * pushAwayFromWall);
 
+#if UNITY_6000_0_OR_NEWER
         Vector2 v = rb.linearVelocity;
+#else
+        Vector2 v = rb.velocity;
+#endif
+
         if (v.sqrMagnitude > 0.0001f)
         {
             Vector2 reflected = Vector2.Reflect(v.normalized, normal).normalized;
             currentDir = reflected;
+
+#if UNITY_6000_0_OR_NEWER
             rb.linearVelocity = reflected * (baseMoveSpeed * 0.8f);
+#else
+            rb.velocity = reflected * (baseMoveSpeed * 0.8f);
+#endif
         }
     }
 
     // =========================================================
-    //  TARGET TRIGGER
+    //  TARGET TRIGGER (CADANGAN)
     // =========================================================
-
     void OnTriggerEnter2D(Collider2D other)
     {
         if (!searching) return;
@@ -720,7 +744,6 @@ public class Drone : MonoBehaviour
     // =========================================================
     //  VISUAL (TILT + VIBRATION + PROPELLERS)
     // =========================================================
-
     void ResetVisual()
     {
         if (bodyTransform == null) return;
@@ -734,7 +757,7 @@ public class Drone : MonoBehaviour
 
         float speed = velocity.magnitude;
 
-        // ----- Hover vibration -----
+        // Hover vibration
         float t = Time.time * idleVibrationFrequency;
         float nX = Mathf.PerlinNoise(t, 0f) - 0.5f;
         float nY = Mathf.PerlinNoise(0f, t) - 0.5f;
@@ -745,7 +768,7 @@ public class Drone : MonoBehaviour
         Vector3 offset = new Vector3(nX, nY, 0f) * idleVibrationAmplitude * ampScale;
         bodyTransform.localPosition = bodyBaseLocalPos + offset;
 
-        // ----- Tilt menghadap arah gerak -----
+        // Tilt menghadap arah gerak
         if (speed > 0.01f)
         {
             Vector2 dir = velocity.normalized;
@@ -774,7 +797,7 @@ public class Drone : MonoBehaviour
             );
         }
 
-        // ----- Propeller spin (lebih pelan supaya kelihatan) -----
+        // Propeller spin
         float spinBase = 120f + speed * 60f;
         spinBase *= Time.deltaTime;
 
