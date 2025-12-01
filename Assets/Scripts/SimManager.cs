@@ -23,8 +23,7 @@ public class SimManager : MonoBehaviour
     public TMP_Text leaderText;
     public TMP_Text objectText;
 
-    [Header("Play / Stop Button")]
-    // OnClick -> SimManager.OnPlayButton
+    [Header("Play Button")]
     public Button playButton;
     public Image playImage;
     public TMP_Text playText;
@@ -40,7 +39,7 @@ public class SimManager : MonoBehaviour
     // =========================================================
     //  INTERNAL STATE
     // =========================================================
-    bool isPlaying = false;
+    bool isPlaying   = false;
 
     bool searching   = false;
     bool returning   = false;
@@ -49,8 +48,7 @@ public class SimManager : MonoBehaviour
     float foundTimer  = 0f;
     float returnTimer = 0f;
 
-    // hanya untuk log (optional)
-    float simulationStartTime;
+    float simulationStartTime = 0f;
 
     // =========================================================
     //  LOG HELPER
@@ -58,10 +56,8 @@ public class SimManager : MonoBehaviour
     void LogState(string tag)
     {
         Debug.Log($"[SimManager:{tag}] " +
-                  $"isPlaying={isPlaying}, " +
-                  $"searching={searching}, returning={returning}, " +
-                  $"targetFound={targetFound}, " +
-                  $"foundTimer={foundTimer:0.00}, returnTimer={returnTimer:0.00}");
+                  $"isPlaying={isPlaying}, searching={searching}, returning={returning}, " +
+                  $"targetFound={targetFound}, foundTimer={foundTimer:0.00}, returnTimer={returnTimer:0.00}");
     }
 
     // =========================================================
@@ -76,10 +72,11 @@ public class SimManager : MonoBehaviour
         AutoAssignTexts();
         AssignDroneNames();
 
-        RandomizeAll();          // sekali di awal
-        ResetSimulation(true);   // posisi drone ke home
+        RandomizeAll();          // pilih leader & target sekali
+        ResetSimulation(true);   // kembalikan drone ke home
 
         InitUI();
+
         LogState("Start-End");
     }
 
@@ -89,22 +86,23 @@ public class SimManager : MonoBehaviour
     }
 
     // =========================================================
-    //  BUTTON EVENT (PLAY / STOP TOGGLE)
+    //  PLAY BUTTON (HANYA START, TIDAK ADA STOP)
     // =========================================================
-
     public void OnPlayButton()
     {
         Debug.Log("[SimManager] OnPlayButton() clicked");
+
+        // Kalau simulasi sudah berjalan → abaikan klik apa pun
+        if (isPlaying)
+        {
+            Debug.Log("[SimManager] OnPlayButton ignored: already playing");
+            return;
+        }
+
         LogState("Before-PlayButton");
 
-        if (!isPlaying)
-        {
-            StartSimulation();   // Play
-        }
-        else
-        {
-            StopSimulation();    // Stop
-        }
+        // Mulai simulasi satu kali
+        StartSimulation();
 
         LogState("After-PlayButton");
     }
@@ -112,18 +110,18 @@ public class SimManager : MonoBehaviour
     // =========================================================
     //  INIT / SETUP
     // =========================================================
-
     void AutoAssignTexts()
     {
-        Debug.Log("[SimManager] AutoAssignTexts()");
-
         if (playText == null && playButton != null)
             playText = playButton.GetComponentInChildren<TMP_Text>(true);
+
+        Debug.Log("[SimManager] AutoAssignTexts()");
     }
 
     void AssignDroneNames()
     {
         Debug.Log("[SimManager] AssignDroneNames()");
+
         if (drones == null) return;
 
         for (int i = 0; i < drones.Length; i++)
@@ -131,7 +129,7 @@ public class SimManager : MonoBehaviour
             if (drones[i] != null)
             {
                 drones[i].droneName = $"Drone {i + 1}";
-                Debug.Log($"[SimManager]  Drone[{i}] name set to {drones[i].droneName}");
+                Debug.Log($"[SimManager] Drone[{i}] name set to {drones[i].droneName}");
             }
         }
     }
@@ -150,29 +148,31 @@ public class SimManager : MonoBehaviour
     // =========================================================
     //  SIMULATION LIFECYCLE
     // =========================================================
-
     void StartSimulation()
     {
         Debug.Log("[SimManager] StartSimulation()");
         Flash(playImage, playIdle);
 
-        // reset timer & posisi drone, TANPA pesan
+        // Reset posisi & timer tapi tanpa pesan
         ResetSimulation(false);
 
-        isPlaying           = true;
-        searching           = true;
-        targetFound         = false;
-        returning           = false;
+        isPlaying   = true;
+        searching   = true;
+        returning   = false;
+        targetFound = false;
+
         simulationStartTime = Time.unscaledTime;
 
         StartAllSearch();
 
-        if (playText != null) playText.text = "Stop";
+        // Teks tombol boleh tetap "Play" (tidak toggle)
+        if (playText != null) playText.text = "Play";
         SetStatus("Searching...");
 
         LogState("StartSimulation-End");
     }
 
+    // Disimpan kalau nanti mau dipakai tombol Reset terpisah
     void StopSimulation()
     {
         Debug.Log("[SimManager] StopSimulation()");
@@ -180,7 +180,6 @@ public class SimManager : MonoBehaviour
 
         isPlaying = false;
 
-        // kembali ke kondisi awal + pesan
         ResetSimulation(true);
 
         if (playText != null) playText.text = "Play";
@@ -189,7 +188,7 @@ public class SimManager : MonoBehaviour
     }
 
     // =========================================================
-    //  RANDOMIZER (DIPAKAI HANYA DI AWAL)
+    //  RANDOMIZER (ONLY AT START)
     // =========================================================
     void RandomizeAll()
     {
@@ -201,27 +200,19 @@ public class SimManager : MonoBehaviour
 
     void RandomizeLeader()
     {
-        if (drones == null || drones.Length == 0)
-        {
-            Debug.Log("[SimManager] RandomizeLeader() skipped (no drones).");
-            return;
-        }
+        if (drones == null || drones.Length == 0) return;
 
         int idx = Random.Range(0, drones.Length);
-        Debug.Log("[SimManager] RandomizeLeader() -> leader index " + idx);
+        Debug.Log("[SimManager] RandomizeLeader() -> " + idx);
 
         for (int i = 0; i < drones.Length; i++)
-        {
-            if (drones[i] == null) continue;
             drones[i].isLeader = (i == idx);
-        }
     }
 
     void RandomizeTarget()
     {
         if (targetObject == null || targetSpawns == null || targetSpawns.Length == 0)
         {
-            Debug.LogWarning("[SimManager] RandomizeTarget() skipped, targetObject/targetSpawns missing.");
             if (objectText != null) objectText.text = "Object: None";
             return;
         }
@@ -241,7 +232,6 @@ public class SimManager : MonoBehaviour
     void ResetSimulation(bool showMessage)
     {
         Debug.Log("[SimManager] ResetSimulation(showMessage=" + showMessage + ")");
-        Time.timeScale = 1f;
 
         searching   = false;
         returning   = false;
@@ -270,20 +260,21 @@ public class SimManager : MonoBehaviour
     // =========================================================
     void StartAllSearch()
     {
-        Debug.Log("[SimManager] StartAllSearch()");
         if (drones == null) return;
 
         foreach (var d in drones)
             if (d != null)
                 d.StartSearch();
+
+        Debug.Log("[SimManager] StartAllSearch()");
     }
 
     public void OnDroneFoundTarget(Drone d)
     {
-        Debug.Log("[SimManager] OnDroneFoundTarget() from " + (d != null ? d.droneName : "null"));
-        LogState("Before-OnDroneFoundTarget");
-
         if (targetFound) return;
+
+        Debug.Log("[SimManager] OnDroneFoundTarget() by " + (d != null ? d.droneName : "null"));
+        LogState("Before-OnDroneFoundTarget");
 
         targetFound = true;
         searching   = false;
@@ -292,32 +283,21 @@ public class SimManager : MonoBehaviour
 
         SetStatus($"{d.droneName} found target. Returning...");
 
-        if (drones != null)
-        {
-            foreach (var drone in drones)
-                if (drone != null)
-                    drone.ReturnHome();
-        }
+        foreach (var x in drones)
+            if (x != null)
+                x.ReturnHome();
 
         LogState("After-OnDroneFoundTarget");
     }
 
     public void OnDroneReachedHome(Drone d)
     {
-        Debug.Log("[SimManager] OnDroneReachedHome() from " + (d != null ? d.droneName : "null"));
         LogState("Before-OnDroneReachedHome");
 
         if (!returning || drones == null) return;
 
         foreach (var x in drones)
-        {
-            if (x == null) continue;
-            if (!x.IsAtHome)
-            {
-                Debug.Log("[SimManager] OnDroneReachedHome() -> not all home yet.");
-                return;
-            }
-        }
+            if (!x.IsAtHome) return;
 
         returning = false;
         SetStatus("All drones at Home Base");
@@ -354,7 +334,7 @@ public class SimManager : MonoBehaviour
     }
 
     // =========================================================
-    //  ROLE VISUAL
+    //  ROLES
     // =========================================================
     void InitRoles()
     {
@@ -362,12 +342,12 @@ public class SimManager : MonoBehaviour
 
         if (drones == null || drones.Length == 0)
         {
-            if (leaderText != null) leaderText.text = "Leader: None";
+            if (leaderText != null)
+                leaderText.text = "Leader: None";
             return;
         }
 
         int leaderIndex = -1;
-
         for (int i = 0; i < drones.Length; i++)
         {
             if (drones[i] != null && drones[i].isLeader)
@@ -379,16 +359,12 @@ public class SimManager : MonoBehaviour
 
         if (leaderIndex < 0) leaderIndex = 0;
 
-        for (int i = 0; i < drones.Length; i++)
-        {
-            if (drones[i] == null) continue;
-            drones[i].ApplyRoleVisual(leaderColor, memberColor);
-        }
+        foreach (var d in drones)
+            if (d != null)
+                d.ApplyRoleVisual(leaderColor, memberColor);
 
         if (leaderText != null)
             leaderText.text = $"Leader: Drone {leaderIndex + 1}";
-
-        Debug.Log("[SimManager] InitRoles() -> leader index " + leaderIndex);
     }
 
     // =========================================================
@@ -411,7 +387,7 @@ public class SimManager : MonoBehaviour
     IEnumerator FlashRoutine(Image img, Color idle)
     {
         img.color = pressed;
-        yield return new WaitForSecondsRealtime(0.15f); // tidak terpengaruh Time.timeScale
+        yield return new WaitForSecondsRealtime(0.15f);
         img.color = idle;
     }
 }
