@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
@@ -16,12 +17,17 @@ public class SimManager : MonoBehaviour
     public Transform targetObject;
     public Transform[] targetSpawns;
 
+    [Header("Room Zones")]
+    [Tooltip("Daftar ruangan (boleh dikosongkan, nanti akan auto-find).")]
+    public RoomZone[] roomZones;
+
     [Header("UI: Text")]
     public TMP_Text timeFoundText;
     public TMP_Text timeReturnText;
     public TMP_Text statusText;
     public TMP_Text leaderText;
     public TMP_Text objectText;
+    public TMP_Text roomsVisitedText;     // opsional, untuk debug list ruangan
 
     [Header("Play Button")]
     public Button playButton;
@@ -50,6 +56,10 @@ public class SimManager : MonoBehaviour
 
     float simulationStartTime = 0f;
 
+    // room visited
+    Dictionary<int, RoomZone> roomById  = new Dictionary<int, RoomZone>();
+    HashSet<int> visitedRoomIds         = new HashSet<int>();
+
     // =========================================================
     //  LOG HELPER
     // =========================================================
@@ -71,9 +81,10 @@ public class SimManager : MonoBehaviour
 
         AutoAssignTexts();
         AssignDroneNames();
+        AutoCollectRooms();     // <-- kumpulkan semua RoomZone
 
-        RandomizeAll();          // pilih leader & target sekali
-        ResetSimulation(true);   // kembalikan drone ke home
+        RandomizeAll();         // pilih leader & target sekali
+        ResetSimulation(true);  // kembalikan drone ke home
 
         InitUI();
 
@@ -134,6 +145,42 @@ public class SimManager : MonoBehaviour
         }
     }
 
+    void AutoCollectRooms()
+    {
+        // Jika belum diisi di Inspector → auto cari semua RoomZone
+        if (roomZones == null || roomZones.Length == 0)
+        {
+            roomZones = FindObjectsOfType<RoomZone>();
+        }
+
+        roomById.Clear();
+        visitedRoomIds.Clear();
+
+        if (roomZones != null)
+        {
+            foreach (var rz in roomZones)
+            {
+                if (rz == null) continue;
+
+                if (!roomById.ContainsKey(rz.roomId))
+                {
+                    roomById.Add(rz.roomId, rz);
+                }
+                else
+                {
+                    Debug.LogWarning($"[SimManager] Duplicate RoomId={rz.roomId} on {rz.name}");
+                }
+
+                // pastikan flag awal
+                rz.visited = false;
+            }
+        }
+
+        UpdateRoomsVisitedText();
+
+        Debug.Log($"[SimManager] AutoCollectRooms() -> found {roomById.Count} rooms");
+    }
+
     void InitUI()
     {
         Debug.Log("[SimManager] InitUI()");
@@ -143,6 +190,7 @@ public class SimManager : MonoBehaviour
 
         SetStatus("Press Play to start.");
         UpdateTimerText();
+        UpdateRoomsVisitedText();
     }
 
     // =========================================================
@@ -240,6 +288,18 @@ public class SimManager : MonoBehaviour
         foundTimer  = 0f;
         returnTimer = 0f;
 
+        // Reset visited rooms
+        visitedRoomIds.Clear();
+        if (roomZones != null)
+        {
+            foreach (var rz in roomZones)
+            {
+                if (rz == null) continue;
+                rz.visited = false;
+            }
+        }
+        UpdateRoomsVisitedText();
+
         if (drones != null)
         {
             foreach (var d in drones)
@@ -304,6 +364,28 @@ public class SimManager : MonoBehaviour
         LogState("After-OnDroneReachedHome");
     }
 
+    /// <summary>
+    /// Dipanggil oleh RoomZone saat Drone masuk trigger ruangan.
+    /// </summary>
+    public void OnDroneEnterRoom(RoomZone zone, Drone d)
+    {
+        if (zone == null || d == null) return;
+
+        // Kalau belum pernah dikunjungi → tandai visited
+        if (!zone.visited)
+        {
+            zone.visited = true;
+            visitedRoomIds.Add(zone.roomId);
+
+            Debug.Log($"[SimManager] Room visited: {zone.roomName} (Id={zone.roomId}) by {d.droneName}");
+            UpdateRoomsVisitedText();
+        }
+        else
+        {
+            Debug.Log($"[SimManager] {d.droneName} re-entered room: {zone.roomName} (Id={zone.roomId})");
+        }
+    }
+
     // =========================================================
     //  TIMERS
     // =========================================================
@@ -331,6 +413,22 @@ public class SimManager : MonoBehaviour
 
         if (timeReturnText != null)
             timeReturnText.text = $"Return: {returnTimer:0.0} s";
+    }
+
+    void UpdateRoomsVisitedText()
+    {
+        if (roomsVisitedText == null) return;
+
+        if (roomZones == null || roomZones.Length == 0)
+        {
+            roomsVisitedText.text = "Rooms: (none)";
+            return;
+        }
+
+        int total = roomZones.Length;
+        int visitedCount = visitedRoomIds.Count;
+
+        roomsVisitedText.text = $"Rooms visited: {visitedCount}/{total}";
     }
 
     // =========================================================

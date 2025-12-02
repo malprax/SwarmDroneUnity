@@ -202,7 +202,7 @@ public class Drone : MonoBehaviour
     void Awake()
     {
         rb = GetComponent<Rigidbody2D>();
-        manager = FindFirstObjectByType<SimManager>();
+        manager = FindObjectOfType<SimManager>();
 
         homePosition = transform.position;
         lastPos = homePosition;
@@ -484,26 +484,39 @@ public class Drone : MonoBehaviour
             }
             else
             {
-                // MODE NORMAL PULANG
+                // ===========================================
+                //  MODE NORMAL PULANG (PAKAI LINE-OF-SIGHT KE HOME)
+                // ===========================================
+                bool hasLOSHome = HasLineOfSightToHome(physPos, home);
+
+                // Kalau tidak ada LOS (home di balik tembok), kurangi bobot toHomeDir,
+                // perkuat sensor & topo supaya drone cari lorong dulu.
+                float wHome       = hasLOSHome ? 0.9f : 0.2f;
+                float wSensor     = hasLOSHome ? 1.0f : 1.8f;
+                float wTopo       = hasLOSHome ? 1.2f : 1.8f;
+                float wAvoidance  = hasLOSHome ? (avoidanceWeight * 1.3f)
+                                               : (avoidanceWeight * 1.6f);
+                float wFrontAvoid = hasLOSHome ? 1.5f : 1.8f;
+
                 Vector2 sensorSteer = ComputeSensorSteer(
                     dFront, dRight, dBack, dLeft,
                     toHomeDir,
                     false           // jangan pakai center bias saat pulang
                 );
 
-                // Kombinasi dengan bobot: walls lebih kuat dari arah home
+                // Kombinasi dengan bobot adaptif
                 Vector2 combo =
-                    toHomeDir * 0.7f +
-                    sensorSteer * 1.2f +
-                    avoidance * (avoidanceWeight * 1.3f) +
-                    topoSteer * 1.5f +
-                    frontAvoidSteerHome * 1.5f;
+                    toHomeDir * wHome +
+                    sensorSteer * wSensor +
+                    avoidance * wAvoidance +
+                    topoSteer * wTopo +
+                    frontAvoidSteerHome * wFrontAvoid;
 
                 desiredDir = combo.normalized;
                 if (desiredDir == Vector2.zero)
                     desiredDir = toHomeDir;
 
-                LogNav($"[ReturnHome-Normal] topo={topoHome} dist={dist:F2} dF={dFront:F2} dR={dRight:F2} dB={dBack:F2} dL={dLeft:F2}");
+                LogNav($"[ReturnHome-Normal] topo={topoHome} dist={dist:F2} dF={dFront:F2} dR={dRight:F2} dB={dBack:F2} dL={dLeft:F2} LOS={hasLOSHome}");
             }
 
             // Anti-stuck khusus saat pulang (pakai posisi fisik)
@@ -1012,6 +1025,25 @@ public class Drone : MonoBehaviour
             tangent = -tangent;
 
         return Vector2.Lerp(desiredDir, tangent, slideAlongWallWeight).normalized;
+    }
+
+    // =========================================================
+    //  LINE OF SIGHT KE HOME BASE
+    // =========================================================
+    bool HasLineOfSightToHome(Vector2 origin, Vector2 home)
+    {
+        Vector2 dir = home - origin;
+        float dist = dir.magnitude;
+        if (dist <= 0.0001f)
+            return true;
+
+        dir /= dist;
+
+        int mask = 1 << wallLayer;
+        RaycastHit2D hit = Physics2D.Raycast(origin, dir, dist, mask);
+
+        // Kalau raycast TIDAK kena wall, berarti LOS ke home
+        return !hit;
     }
 
     // =========================================================

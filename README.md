@@ -13,7 +13,23 @@ swarm drone simulation dissertation
 
 
 
-Now hit Play and the drones will search for the object, report who found it, and return home.
-4.4 7.81
+poin penting:
+A. Buat visual overlay visited-room
 
-2.68 6.4603
+Misal ruangan berubah warna jika sudah dikunjungi.
+
+B. Buat logic “skip ruangan yang sudah dikunjungi”
+
+Drone akan otomatis hanya masuk ke ruangan baru → mempercepat pencarian.
+
+C. Buat “ruangan kosong” skip cepat
+
+Jika ruangan sudah full scanned → drone keluar lewat pintu berikutnya.
+
+D. Visualisasi log kunjungan ruangan
+
+Untuk laporan ICRES / disertasi.
+
+E. Debug garis batas ruangan
+
+Agar mudah melihat kapan trigger aktif.
