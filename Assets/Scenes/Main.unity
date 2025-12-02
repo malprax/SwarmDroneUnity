@@ -2926,18 +2926,22 @@ MonoBehaviour:
   propSpeedPerUnitVelocity: 720
   baseMoveSpeed: 2
   maxMoveSpeed: 3.5
-  avoidanceRadius: 0.3
+  avoidanceRadius: 0.5
   wallCheckDistance: 0.7
   avoidanceWeight: 1
   randomJitterStrength: 0.4
   minMoveDistance: 0.25
   stuckTimeThreshold: 0.6
-  pushAwayFromWall: 0.05
+  pushAwayFromWall: 0.1
   slideAlongWallWeight: 0.8
   throttleResponse: 3
   motorNoiseAmplitude: 0.15
   frontVeryNearDistance: 0.28
   backOffDuration: 0.35
+  stuckTurnAngleDeg: 30
+  maxStuckTurns: 4
+  frontAvoidDistance: 0.6
+  frontAvoidTurnAngleDeg: 70
   rSensorFront: {fileID: 0}
   rSensorRight: {fileID: 0}
   rSensorBack: {fileID: 0}
@@ -2951,6 +2955,8 @@ MonoBehaviour:
   positionSensor: {fileID: 0}
   homeReachThreshold: 0.12
   camera360Sensor: {fileID: 0}
+  enableDebugLogs: 1
+  debugLogInterval: 0.3
 --- !u!58 &1193971010
 CircleCollider2D:
   m_ObjectHideFlags: 0
@@ -3532,7 +3538,7 @@ SpriteRenderer:
   m_SortingLayer: 0
   m_SortingOrder: 0
   m_Sprite: {fileID: 7482667652216324306, guid: 311925a002f4447b3a28927169b83ea6, type: 3}
-  m_Color: {r: 0.9, g: 0.9, b: 0.9, a: 1}
+  m_Color: {r: 1, g: 0.9803922, b: 0.9803922, a: 1}
   m_FlipX: 0
   m_FlipY: 0
   m_DrawMode: 0
