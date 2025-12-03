@@ -522,8 +522,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 6ff4ac76dab9f414e940ebf8d4ae603f, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::RoomZone
-  roomId: 0
-  roomName: Room 1
+  roomId: 3
+  roomName: HomeZone
   visited: 0
 --- !u!61 &238794053
 BoxCollider2D:
@@ -559,7 +559,7 @@ BoxCollider2D:
   m_UsedByEffector: 0
   m_CompositeOperation: 0
   m_CompositeOrder: 0
-  m_Offset: {x: 0, y: 0}
+  m_Offset: {x: 0, y: -0.1}
   m_SpriteTilingProperty:
     border: {x: 0, y: 0, z: 0, w: 0}
     pivot: {x: 0, y: 0}
@@ -569,7 +569,7 @@ BoxCollider2D:
     drawMode: 0
     adaptiveTiling: 0
   m_AutoTiling: 0
-  m_Size: {x: 11, y: 7.4}
+  m_Size: {x: 10.63, y: 7.2}
   m_EdgeRadius: 0
 --- !u!4 &238794054
 Transform:
@@ -915,8 +915,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b4ccbba1128a94fd5bff9e0bdc8ed3c8, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::DoorWaypoint
-  fromRoomId: 0
-  toRoomId: 3
+  fromRoomId: 3
+  toRoomId: 2
   bidirectional: 1
 --- !u!4 &446233913
 Transform:
@@ -962,7 +962,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b4ccbba1128a94fd5bff9e0bdc8ed3c8, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::DoorWaypoint
-  fromRoomId: 0
+  fromRoomId: 3
   toRoomId: 1
   bidirectional: 1
 --- !u!4 &455015482
@@ -2317,7 +2317,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b4ccbba1128a94fd5bff9e0bdc8ed3c8, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::DoorWaypoint
-  fromRoomId: 0
+  fromRoomId: 3
   toRoomId: 2
   bidirectional: 1
 --- !u!4 &858976324

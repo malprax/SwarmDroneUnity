@@ -33,3 +33,11 @@ Untuk laporan ICRES / disertasi.
 E. Debug garis batas ruangan
 
 Agar mudah melihat kapan trigger aktif.
+
+
+metode yang mau di riset subuh?
+✅ Versi simpel: Flood Fill room-by-room
+
+✅ Versi advance: BFS/Dijkstra pathfinding antar ruangan
+
+✅ Versi full: SLAM indoor mini (graph slam)
