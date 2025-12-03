@@ -1,8 +1,10 @@
 using UnityEngine;
 
+
 [RequireComponent(typeof(Rigidbody2D), typeof(Collider2D))]
 public class Drone : MonoBehaviour
 {
+    public SimManager simManager;
     // =========================================================
     //  LOCAL WALL TOPOLOGY ENUM
     // =========================================================
@@ -220,6 +222,10 @@ public class Drone : MonoBehaviour
         wallLayer = LayerMask.NameToLayer("Wall");
         droneLayer = LayerMask.NameToLayer("Drone");
 
+        if (simManager == null)
+        simManager = FindFirstObjectByType<SimManager>();  // Unity 6
+    // atau FindObjectOfType<SimManager>(); di Unity lama
+
         // Auto-detect LEDMarker
         if (ledMarker == null)
         {
@@ -400,6 +406,23 @@ public class Drone : MonoBehaviour
     // =========================================================
     void FixedUpdate()
     {
+        // early return
+         if (simManager == null || !simManager.IsPlaying)
+    {
+        if (rb != null)
+        {
+#if UNITY_6000_0_OR_NEWER
+            rb.linearVelocity = Vector2.zero;
+#else
+            rb.velocity = Vector2.zero;
+#endif
+        }
+
+        // (opsional) matikan animasi propeller / lampu dsb di sini
+
+        return; // stop di sini, jangan lanjutkan navigasi
+    }
+
         // Safety: kalau manager belum ketemu (mis. scene baru di-load)
         if (manager == null)
             manager = FindFirstObjectByType<SimManager>();

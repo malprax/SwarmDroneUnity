@@ -31,10 +31,15 @@ public class SimManager : MonoBehaviour
     public TMP_Text objectText;
     public TMP_Text roomsVisitedText;
 
+    // Debounce untuk tombol Play (mencegah double-click sangat cepat)
+    float lastPlayToggleTime = -999f;
+    public float playToggleCooldown = 0.2f; // dalam detik
+
     [Header("Play Button")]
     public Button playButton;
     public Image playImage;
     public TMP_Text playText;
+    public bool IsPlaying => isPlaying;
 
     [Header("Colors")]
     public Color playIdle = new Color(0.4f, 1f, 0.4f);
@@ -148,11 +153,11 @@ public class SimManager : MonoBehaviour
 
         Time.timeScale = 1f;
 
+        AutoAssignDrones();      // <<< BARU
         AutoAssignTexts();
         AssignDroneNames();
         AutoCollectRooms();
         RandomizeAll();
-        InitMaze();
         RebuildStatContainers();
         ResetSimulation(true);
         InitUI();
@@ -168,22 +173,47 @@ public class SimManager : MonoBehaviour
         SampleSpeeds();
     }
 
-    // =========================================================
-    //  PLAY BUTTON : TOGGLE PLAY / STOP
-    // =========================================================
-    public void OnPlayButton()
+   // =========================================================
+//  PLAY & STOP BUTTON (DIPISAH)
+// =========================================================
+public void OnPlayButton()
+{
+    // Debounce
+    float now = Time.unscaledTime;
+    if (now - lastPlayToggleTime < playToggleCooldown)
     {
-        Debug.Log("[SimManager] OnPlayButton() clicked");
-
-        if (!isPlaying)
-        {
-            StartSimulation();
-        }
-        else
-        {
-            StopSimulation();
-        }
+        Debug.Log("[SimManager] OnPlayButton() ignored (debounce)");
+        return;
     }
+    lastPlayToggleTime = now;
+
+    Debug.Log("[SimManager] OnPlayButton() clicked | isPlaying=" + isPlaying);
+
+    // HANYA start kalau belum jalan
+    if (!isPlaying)
+    {
+        StartSimulation();
+    }
+}
+
+public void OnStopButton()
+{
+    // Debounce juga, biar tidak spam
+    float now = Time.unscaledTime;
+    if (now - lastPlayToggleTime < playToggleCooldown)
+    {
+        Debug.Log("[SimManager] OnStopButton() ignored (debounce)");
+        return;
+    }
+    lastPlayToggleTime = now;
+
+    Debug.Log("[SimManager] OnStopButton() clicked | isPlaying=" + isPlaying);
+
+    if (isPlaying)
+    {
+        StopSimulation();   // <-- ini yang benar-benar memanggil StopSimulation
+    }
+}
 
     // =========================================================
     //  INIT / SETUP
@@ -194,6 +224,19 @@ public class SimManager : MonoBehaviour
             playText = playButton.GetComponentInChildren<TMP_Text>(true);
 
         Debug.Log("[SimManager] AutoAssignTexts()");
+    }
+
+    void AutoAssignDrones()
+    {
+        // Kalau di Inspector sudah diisi, jangan diubah
+        if (drones != null && drones.Length > 0) return;
+
+        // Cari semua Drone yang aktif di scene
+        drones = FindObjectsByType<Drone>(FindObjectsSortMode.None);
+
+        if (drones == null) drones = new Drone[0];
+
+        Debug.Log("[SimManager] AutoAssignDrones() -> found " + drones.Length + " drones");
     }
 
     void AssignDroneNames()
@@ -285,62 +328,36 @@ public class SimManager : MonoBehaviour
 
     static int Bool01(bool b) => b ? 1 : 0;
 
-    // Dipanggil oleh Drone setiap langkah (dari FixedUpdate)
+    // =========================================================
+    //  MICROMOUSE-STYLE GRID LOG
+    // =========================================================
+    [Header("Grid / Micromouse Logging")]
+    public bool enableGridLog = true;
+
     public void ReportGridStep(
         Drone d,
         Vector2 sensedPos,
         float dFront, float dRight, float dBack, float dLeft,
         string decisionLabel)
     {
+        if (!enableGridLog) return;
         if (d == null) return;
 
-        if (!WorldToCell(sensedPos, out int cx, out int cy))
-            return; // di luar grid, abaikan
+        // Pakai cellSize & gridOrigin dari konfigurasi grid di atas
+        float cell = cellSize;
+        Vector2 origin = gridOrigin;
 
-        bool wL = dLeft  < wallDetectDistance;
-        bool wR = dRight < wallDetectDistance;
-        bool wF = dFront < wallDetectDistance;
-        bool wB = dBack  < wallDetectDistance;
+        int cx = Mathf.RoundToInt((sensedPos.x - origin.x) / cell);
+        int cy = Mathf.RoundToInt((sensedPos.y - origin.y) / cell);
 
-        float tRel = (simulationStartTime > 0f)
-            ? (Time.time - simulationStartTime)
-            : 0f;
-
-        var step = new GridStep
-        {
-            cellX   = cx,
-            cellY   = cy,
-            wallL   = wL,
-            wallR   = wR,
-            wallF   = wF,
-            wallB   = wB,
-            decision = decisionLabel,
-            time    = tRel
-        };
-
-        _allGridSteps.Add(step);
-
-        if (!_routeByDrone.TryGetValue(d, out var list))
-        {
-            list = new List<GridStep>();
-            _routeByDrone[d] = list;
-        }
-        list.Add(step);
-
-        // Simpan ke MazeCell hanya jika pertama kali dikunjungi
-        var cell = _maze[cx, cy];
-        if (!cell.visited)
-        {
-            cell.visited = true;
-            cell.wallL = wL;
-            cell.wallR = wR;
-            cell.wallF = wF;
-            cell.wallB = wB;
-        }
+        const float wallThresh = 0.8f;
+        int wL = (dLeft  < wallThresh) ? 1 : 0;
+        int wR = (dRight < wallThresh) ? 1 : 0;
+        int wF = (dFront < wallThresh) ? 1 : 0;
+        int wB = (dBack  < wallThresh) ? 1 : 0;
 
         Debug.Log($"[GridStep] {d.droneName} cell=({cx},{cy}) " +
-                  $"walls L={Bool01(wL)},R={Bool01(wR)},F={Bool01(wF)},B={Bool01(wB)} " +
-                  $"decision={decisionLabel}");
+                  $"walls L={wL},R={wR},F={wF},B={wB} decision={decisionLabel}");
     }
 
     // =========================================================
@@ -389,65 +406,59 @@ public class SimManager : MonoBehaviour
     //  SIMULATION LIFECYCLE
     // =========================================================
     void StartSimulation()
+{
+    Debug.Log("[SimManager] StartSimulation()");
+    Flash(playImage, playIdle);
+
+    InitMaze();
+    RebuildStatContainers();
+    ResetSimulation(false);
+
+    isPlaying   = true;
+    searching   = true;
+    returning   = false;
+    targetFound = false;
+
+    simulationStartTime = Time.time;
+    missionEndTime      = 0f;
+
+    _foundByDroneName = "";
+    _foundByLeader    = false;
+
+    StartAllSearch();
+    SetStatus("Searching...");
+
+    LogState("StartSimulation-End");
+}
+
+void StopSimulation()
+{
+    Debug.Log("[SimManager] StopSimulation()");
+    Flash(playImage, playIdle);
+
+    isPlaying = false;
+    searching = false;
+    returning = false;
+
+    if (drones != null)
     {
-        Debug.Log("[SimManager] StartSimulation()");
-        Flash(playImage, playIdle);
-
-        InitMaze();              // reset peta untuk run baru
-        RebuildStatContainers(); // siapkan statistik baru
-        ResetSimulation(false);  // reset posisi/flag drone
-
-        isPlaying   = true;
-        searching   = true;
-        returning   = false;
-        targetFound = false;
-
-        simulationStartTime = Time.time;
-        missionEndTime      = 0f;
-
-        _foundByDroneName = "";
-        _foundByLeader    = false;
-
-        StartAllSearch();
-
-        if (playText != null) playText.text = "Stop";
-        SetStatus("Searching...");
-
-        LogState("StartSimulation-End");
-    }
-
-    void StopSimulation()
-    {
-        Debug.Log("[SimManager] StopSimulation()");
-        Flash(playImage, playIdle);
-
-        isPlaying = false;
-        searching = false;
-        returning = false;
-
-        // Hentikan semua drone (tanpa reset posisi / statistik)
-        if (drones != null)
+        foreach (var d in drones)
         {
-            foreach (var d in drones)
-            {
-                if (d == null) continue;
-
-                var rb = d.GetComponent<Rigidbody2D>();
-                if (rb == null) continue;
+            if (d == null) continue;
+            var rb = d.GetComponent<Rigidbody2D>();
+            if (rb == null) continue;
 
 #if UNITY_6000_0_OR_NEWER
-                rb.linearVelocity = Vector2.zero;
+            rb.linearVelocity = Vector2.zero;
 #else
-                rb.velocity = Vector2.zero;
+            rb.velocity = Vector2.zero;
 #endif
-            }
         }
-
-        if (playText != null) playText.text = "Play";
-        SetStatus("Stopped. Press Play to start a new run.");
-
-        LogState("StopSimulation-End");
     }
+
+    SetStatus("Stopped. Press Play to start a new run.");
+    LogState("StopSimulation-End");
+}
 
     void ResetSimulation(bool showMessage)
     {
