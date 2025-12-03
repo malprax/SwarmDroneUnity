@@ -61,6 +61,47 @@ public class SimManager : MonoBehaviour
     public List<List<float>> DistanceHistory => _distanceHistory;
 
     // =========================================================
+    //  GRID / MICROMOUSE-STYLE MAPPING
+    // =========================================================
+    [System.Serializable]
+    public class MazeCell
+    {
+        public bool visited;
+        // dinding relatif terhadap orientasi drone saat pertama kali masuk
+        public bool wallL, wallR, wallF, wallB;
+    }
+
+    [System.Serializable]
+    public class GridStep
+    {
+        public int cellX;
+        public int cellY;
+        public bool wallL, wallR, wallF, wallB;
+        public string decision;   // FWD / LEFT / RIGHT / BACK / IDLE
+        public float time;        // waktu relatif dari start
+    }
+
+    [Header("Grid Mapping (Micromouse Style)")]
+    [Tooltip("Lebar grid (jumlah kolom).")]
+    public int gridWidth = 16;
+
+    [Tooltip("Tinggi grid (jumlah baris).")]
+    public int gridHeight = 10;
+
+    [Tooltip("Ukuran 1 sel grid (unit dunia).")]
+    public float cellSize = 1f;
+
+    [Tooltip("Posisi world untuk sel (0,0) grid. Atur kira-kira di pojok kiri bawah arena.")]
+    public Vector2 gridOrigin = new Vector2(-8f, -4f);
+
+    [Tooltip("Jarak maksimum dianggap ada tembok (dari sensor).")]
+    public float wallDetectDistance = 0.6f;
+
+    MazeCell[,] _maze;
+    List<GridStep> _allGridSteps = new List<GridStep>();
+    Dictionary<Drone, List<GridStep>> _routeByDrone = new Dictionary<Drone, List<GridStep>>();
+
+    // =========================================================
     //  INTERNAL STATE
     // =========================================================
     bool isPlaying   = false;
@@ -79,8 +120,8 @@ public class SimManager : MonoBehaviour
     HashSet<int> visitedRoomIds         = new HashSet<int>();
 
     // Speed history containers
-    List<float> _sampleTimes        = new List<float>();
-    List<List<float>> _speedHistory = new List<List<float>>();
+    List<float> _sampleTimes           = new List<float>();
+    List<List<float>> _speedHistory    = new List<List<float>>();
     List<List<float>> _distanceHistory = new List<List<float>>();
 
     // Meta info untuk CSV
@@ -111,7 +152,8 @@ public class SimManager : MonoBehaviour
         AssignDroneNames();
         AutoCollectRooms();
         RandomizeAll();
-        RebuildStatContainers();   // siapkan list speed/times
+        InitMaze();
+        RebuildStatContainers();
         ResetSimulation(true);
         InitUI();
 
@@ -135,12 +177,10 @@ public class SimManager : MonoBehaviour
 
         if (!isPlaying)
         {
-            // Mulai simulasi baru
             StartSimulation();
         }
         else
         {
-            // Hentikan simulasi (data tetap tersimpan untuk export)
             StopSimulation();
         }
     }
@@ -211,6 +251,99 @@ public class SimManager : MonoBehaviour
     }
 
     // =========================================================
+    //  MAZE / GRID INIT
+    // =========================================================
+    void InitMaze()
+    {
+        _maze = new MazeCell[gridWidth, gridHeight];
+        for (int x = 0; x < gridWidth; x++)
+        {
+            for (int y = 0; y < gridHeight; y++)
+            {
+                _maze[x, y] = new MazeCell();
+            }
+        }
+
+        _allGridSteps.Clear();
+        _routeByDrone.Clear();
+    }
+
+    // Convert world position ke indeks grid (0..gridWidth-1, 0..gridHeight-1)
+    bool WorldToCell(Vector2 worldPos, out int ix, out int iy)
+    {
+        float lx = (worldPos.x - gridOrigin.x) / cellSize;
+        float ly = (worldPos.y - gridOrigin.y) / cellSize;
+
+        ix = Mathf.FloorToInt(lx);
+        iy = Mathf.FloorToInt(ly);
+
+        if (ix < 0 || ix >= gridWidth || iy < 0 || iy >= gridHeight)
+            return false;
+
+        return true;
+    }
+
+    static int Bool01(bool b) => b ? 1 : 0;
+
+    // Dipanggil oleh Drone setiap langkah (dari FixedUpdate)
+    public void ReportGridStep(
+        Drone d,
+        Vector2 sensedPos,
+        float dFront, float dRight, float dBack, float dLeft,
+        string decisionLabel)
+    {
+        if (d == null) return;
+
+        if (!WorldToCell(sensedPos, out int cx, out int cy))
+            return; // di luar grid, abaikan
+
+        bool wL = dLeft  < wallDetectDistance;
+        bool wR = dRight < wallDetectDistance;
+        bool wF = dFront < wallDetectDistance;
+        bool wB = dBack  < wallDetectDistance;
+
+        float tRel = (simulationStartTime > 0f)
+            ? (Time.time - simulationStartTime)
+            : 0f;
+
+        var step = new GridStep
+        {
+            cellX   = cx,
+            cellY   = cy,
+            wallL   = wL,
+            wallR   = wR,
+            wallF   = wF,
+            wallB   = wB,
+            decision = decisionLabel,
+            time    = tRel
+        };
+
+        _allGridSteps.Add(step);
+
+        if (!_routeByDrone.TryGetValue(d, out var list))
+        {
+            list = new List<GridStep>();
+            _routeByDrone[d] = list;
+        }
+        list.Add(step);
+
+        // Simpan ke MazeCell hanya jika pertama kali dikunjungi
+        var cell = _maze[cx, cy];
+        if (!cell.visited)
+        {
+            cell.visited = true;
+            cell.wallL = wL;
+            cell.wallR = wR;
+            cell.wallF = wF;
+            cell.wallB = wB;
+        }
+
+        Debug.Log($"[GridStep] {d.droneName} cell=({cx},{cy}) " +
+                  $"walls L={Bool01(wL)},R={Bool01(wR)},F={Bool01(wF)},B={Bool01(wB)} " +
+                  $"decision={decisionLabel}");
+    }
+
+    // =========================================================
     //  STATS CONTAINERS (SPEED / DISTANCE)
     // =========================================================
     void RebuildStatContainers()
@@ -260,9 +393,9 @@ public class SimManager : MonoBehaviour
         Debug.Log("[SimManager] StartSimulation()");
         Flash(playImage, playIdle);
 
-        // Siapkan statistik baru & reset posisi/flag
-        RebuildStatContainers();
-        ResetSimulation(false);
+        InitMaze();              // reset peta untuk run baru
+        RebuildStatContainers(); // siapkan statistik baru
+        ResetSimulation(false);  // reset posisi/flag drone
 
         isPlaying   = true;
         searching   = true;

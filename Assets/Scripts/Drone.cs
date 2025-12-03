@@ -439,6 +439,12 @@ public class Drone : MonoBehaviour
         }
 
         Vector2 desiredDir;
+        // untuk logging grid step
+        float dFront = Mathf.Infinity;
+        float dRight = Mathf.Infinity;
+        float dBack  = Mathf.Infinity;
+        float dLeft  = Mathf.Infinity;
+        Vector2 decisionBaseDir = Vector2.zero;
 
         // ===========================================
         //  RETURN HOME MODE (PAKAI POSITION SENSOR + RANGE SENSORS)
@@ -470,10 +476,10 @@ public class Drone : MonoBehaviour
             }
 
             // --- Baca sensor jarak ke dinding ---
-            float dFront = GetSensorDistance(rSensorFront);
-            float dRight = GetSensorDistance(rSensorRight);
-            float dBack  = GetSensorDistance(rSensorBack);
-            float dLeft  = GetSensorDistance(rSensorLeft);
+            dFront = GetSensorDistance(rSensorFront);
+            dRight = GetSensorDistance(rSensorRight);
+            dBack  = GetSensorDistance(rSensorBack);
+            dLeft  = GetSensorDistance(rSensorLeft);
 
             LocalTopo topoHome = DetectLocalTopology(dFront, dRight, dBack, dLeft);
             Vector2 topoSteer  = SteerByTopology(topoHome, toHome, dFront, dRight, dBack, dLeft);
@@ -489,6 +495,7 @@ public class Drone : MonoBehaviour
 
             Vector2 avoidance  = ComputeAvoidance(physPos);
             Vector2 toHomeDir  = toHome.normalized;
+            decisionBaseDir    = toHomeDir; // basis keputusan relatif arah ke home
 
             if (backOffTimer > 0f)
             {
@@ -597,10 +604,10 @@ public class Drone : MonoBehaviour
             currentDir = (currentDir + Random.insideUnitCircle * randomJitterStrength * Time.fixedDeltaTime).normalized;
 
             // Baca sensor jarak
-            float dFront = GetSensorDistance(rSensorFront);
-            float dRight = GetSensorDistance(rSensorRight);
-            float dBack  = GetSensorDistance(rSensorBack);
-            float dLeft  = GetSensorDistance(rSensorLeft);
+            dFront = GetSensorDistance(rSensorFront);
+            dRight = GetSensorDistance(rSensorRight);
+            dBack  = GetSensorDistance(rSensorBack);
+            dLeft  = GetSensorDistance(rSensorLeft);
 
             LocalTopo topoSearch = DetectLocalTopology(dFront, dRight, dBack, dLeft);
             Vector2 topoSteer    = SteerByTopology(topoSearch, currentDir, dFront, dRight, dBack, dLeft);
@@ -728,8 +735,37 @@ public class Drone : MonoBehaviour
                 LogNav($"[Search-AntiStuckTurn] moved={moved:F3} angle={finalAngle:F1}° dF={dFront:F2} dR={dRight:F2} dB={dBack:F2} dL={dLeft:F2} newDir={currentDir}");
             }
 
+            // basis keputusan relatif arah gerak eksplorasi
+            decisionBaseDir = currentDir;
+
             // --- MATA 360: cek target di sekitar kamera ---
             ScanWithCamera360();
+        }
+
+        // ===================================================
+        //  MICROMOUSE-STYLE GRID LOGGING
+        // ===================================================
+        if (manager != null && (searching || returningHome))
+        {
+            bool anySensorValid =
+                !float.IsInfinity(dFront) ||
+                !float.IsInfinity(dRight) ||
+                !float.IsInfinity(dBack)  ||
+                !float.IsInfinity(dLeft);
+
+            if (anySensorValid)
+            {
+                string decisionLabel = ClassifyDecision(desiredDir, decisionBaseDir);
+                manager.ReportGridStep(
+                    this,
+                    sensedPos,
+                    dFront,
+                    dRight,
+                    dBack,
+                    dLeft,
+                    decisionLabel
+                );
+            }
         }
 
         // Anti lengket di tembok (pakai posisi fisik)
@@ -1083,7 +1119,7 @@ public class Drone : MonoBehaviour
     }
 
     // =========================================================
-    //  ROTATE HELPER + FRONT AVOID
+    //  ROTATE HELPER + FRONT AVOID + DECISION CLASSIFIER
     // =========================================================
     Vector2 RotateVec(Vector2 v, float degrees)
     {
@@ -1125,6 +1161,27 @@ public class Drone : MonoBehaviour
         LogNav($"{logTag} dF={dFront:F2} dL={dLeft:F2} dR={dRight:F2} angle={angle:F1}°");
 
         return rotated.normalized;
+    }
+
+    /// <summary>
+    /// Mengklasifikasikan keputusan gerak: FWD / LEFT / RIGHT / BACK / IDLE
+    /// berdasarkan sudut antara arah referensi (refDir) dan arah yang dipilih (chosenDir).
+    /// </summary>
+    string ClassifyDecision(Vector2 chosenDir, Vector2 refDir)
+    {
+        if (chosenDir.sqrMagnitude < 1e-4f || refDir.sqrMagnitude < 1e-4f)
+            return "IDLE";
+
+        chosenDir.Normalize();
+        refDir.Normalize();
+
+        float angle = Vector2.SignedAngle(refDir, chosenDir); // + = kiri
+        float absAngle = Mathf.Abs(angle);
+
+        if (absAngle < 25f)          return "FWD";
+        if (absAngle > 155f)         return "BACK";
+        if (angle > 0f)              return "LEFT";
+        else                         return "RIGHT";
     }
 
     void OnCollisionEnter2D(Collision2D col)
