@@ -1,5 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
+using System.Text;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
@@ -18,7 +20,7 @@ public class SimManager : MonoBehaviour
     public Transform[] targetSpawns;
 
     [Header("Room Zones")]
-    [Tooltip("Daftar ruangan (boleh dikosongkan, nanti akan auto-find).")]
+    [Tooltip("Daftar ruangan (boleh dikosongkan, akan auto-find).")]
     public RoomZone[] roomZones;
 
     [Header("UI: Text")]
@@ -27,7 +29,7 @@ public class SimManager : MonoBehaviour
     public TMP_Text statusText;
     public TMP_Text leaderText;
     public TMP_Text objectText;
-    public TMP_Text roomsVisitedText;     // opsional, untuk debug list ruangan
+    public TMP_Text roomsVisitedText;
 
     [Header("Play Button")]
     public Button playButton;
@@ -43,10 +45,25 @@ public class SimManager : MonoBehaviour
     public Color memberColor = Color.cyan;
 
     // =========================================================
+    //  SPEED GRAPH / STATS
+    // =========================================================
+    [Header("Speed Graph / Stats")]
+    [Tooltip("Batas atas grafik kecepatan (untuk normalisasi 0..1).")]
+    public float graphMaxSpeed = 4f;
+
+    // Riwayat waktu sample (detik sejak StartSimulation)
+    public List<float> SampleTimes => _sampleTimes;
+
+    // Riwayat kecepatan per-drone: SpeedHistory[droneIndex][sampleIndex]
+    public List<List<float>> SpeedHistory => _speedHistory;
+
+    // Riwayat jarak kumulatif per-drone (buat CSV)
+    public List<List<float>> DistanceHistory => _distanceHistory;
+
+    // =========================================================
     //  INTERNAL STATE
     // =========================================================
     bool isPlaying   = false;
-
     bool searching   = false;
     bool returning   = false;
     bool targetFound = false;
@@ -55,10 +72,21 @@ public class SimManager : MonoBehaviour
     float returnTimer = 0f;
 
     float simulationStartTime = 0f;
+    float missionEndTime      = 0f;
 
-    // room visited
+    // Room visited
     Dictionary<int, RoomZone> roomById  = new Dictionary<int, RoomZone>();
     HashSet<int> visitedRoomIds         = new HashSet<int>();
+
+    // Speed history containers
+    List<float> _sampleTimes        = new List<float>();
+    List<List<float>> _speedHistory = new List<List<float>>();
+    List<List<float>> _distanceHistory = new List<List<float>>();
+
+    // Meta info untuk CSV
+    string _foundByDroneName = "";
+    bool   _foundByLeader    = false;
+    int    _targetRoomIndex  = -1;
 
     // =========================================================
     //  LOG HELPER
@@ -81,11 +109,10 @@ public class SimManager : MonoBehaviour
 
         AutoAssignTexts();
         AssignDroneNames();
-        AutoCollectRooms();     // <-- kumpulkan semua RoomZone
-
-        RandomizeAll();         // pilih leader & target sekali
-        ResetSimulation(true);  // kembalikan drone ke home
-
+        AutoCollectRooms();
+        RandomizeAll();
+        RebuildStatContainers();   // siapkan list speed/times
+        ResetSimulation(true);
         InitUI();
 
         LogState("Start-End");
@@ -93,29 +120,29 @@ public class SimManager : MonoBehaviour
 
     void Update()
     {
+        if (!isPlaying) return;
+
         UpdateTimers();
+        SampleSpeeds();
     }
 
     // =========================================================
-    //  PLAY BUTTON (HANYA START, TIDAK ADA STOP)
+    //  PLAY BUTTON : TOGGLE PLAY / STOP
     // =========================================================
     public void OnPlayButton()
     {
         Debug.Log("[SimManager] OnPlayButton() clicked");
 
-        // Kalau simulasi sudah berjalan → abaikan klik apa pun
-        if (isPlaying)
+        if (!isPlaying)
         {
-            Debug.Log("[SimManager] OnPlayButton ignored: already playing");
-            return;
+            // Mulai simulasi baru
+            StartSimulation();
         }
-
-        LogState("Before-PlayButton");
-
-        // Mulai simulasi satu kali
-        StartSimulation();
-
-        LogState("After-PlayButton");
+        else
+        {
+            // Hentikan simulasi (data tetap tersimpan untuk export)
+            StopSimulation();
+        }
     }
 
     // =========================================================
@@ -132,25 +159,21 @@ public class SimManager : MonoBehaviour
     void AssignDroneNames()
     {
         Debug.Log("[SimManager] AssignDroneNames()");
-
         if (drones == null) return;
 
         for (int i = 0; i < drones.Length; i++)
         {
             if (drones[i] != null)
-            {
                 drones[i].droneName = $"Drone {i + 1}";
-                Debug.Log($"[SimManager] Drone[{i}] name set to {drones[i].droneName}");
-            }
         }
     }
 
     void AutoCollectRooms()
     {
-        // Jika belum diisi di Inspector → auto cari semua RoomZone
+        // Pakai API baru: FindObjectsByType (menghindari warning CS0618)
         if (roomZones == null || roomZones.Length == 0)
         {
-            roomZones = FindObjectsOfType<RoomZone>();
+            roomZones = FindObjectsByType<RoomZone>(FindObjectsSortMode.None);
         }
 
         roomById.Clear();
@@ -163,21 +186,15 @@ public class SimManager : MonoBehaviour
                 if (rz == null) continue;
 
                 if (!roomById.ContainsKey(rz.roomId))
-                {
                     roomById.Add(rz.roomId, rz);
-                }
                 else
-                {
                     Debug.LogWarning($"[SimManager] Duplicate RoomId={rz.roomId} on {rz.name}");
-                }
 
-                // pastikan flag awal
                 rz.visited = false;
             }
         }
 
         UpdateRoomsVisitedText();
-
         Debug.Log($"[SimManager] AutoCollectRooms() -> found {roomById.Count} rooms");
     }
 
@@ -194,6 +211,48 @@ public class SimManager : MonoBehaviour
     }
 
     // =========================================================
+    //  STATS CONTAINERS (SPEED / DISTANCE)
+    // =========================================================
+    void RebuildStatContainers()
+    {
+        _sampleTimes = new List<float>();
+        _speedHistory = new List<List<float>>();
+        _distanceHistory = new List<List<float>>();
+
+        int n = (drones != null) ? drones.Length : 0;
+        for (int i = 0; i < n; i++)
+        {
+            _speedHistory.Add(new List<float>());
+            _distanceHistory.Add(new List<float>());
+        }
+    }
+
+    void SampleSpeeds()
+    {
+        if (drones == null || _speedHistory == null) return;
+        if (_speedHistory.Count != drones.Length) return;
+
+        float t = Time.time - simulationStartTime;
+        float dt = (_sampleTimes.Count == 0) ? 0f : (t - _sampleTimes[_sampleTimes.Count - 1]);
+
+        _sampleTimes.Add(t);
+
+        for (int i = 0; i < drones.Length; i++)
+        {
+            float speed = 0f;
+            if (drones[i] != null)
+                speed = drones[i].CurrentVelocity.magnitude;
+
+            _speedHistory[i].Add(speed);
+
+            // jarak kumulatif = jarak sebelumnya + v * dt
+            float lastDist = (_distanceHistory[i].Count > 0) ? _distanceHistory[i][_distanceHistory[i].Count - 1] : 0f;
+            float newDist  = lastDist + speed * dt;
+            _distanceHistory[i].Add(newDist);
+        }
+    }
+
+    // =========================================================
     //  SIMULATION LIFECYCLE
     // =========================================================
     void StartSimulation()
@@ -201,7 +260,8 @@ public class SimManager : MonoBehaviour
         Debug.Log("[SimManager] StartSimulation()");
         Flash(playImage, playIdle);
 
-        // Reset posisi & timer tapi tanpa pesan
+        // Siapkan statistik baru & reset posisi/flag
+        RebuildStatContainers();
         ResetSimulation(false);
 
         isPlaying   = true;
@@ -209,74 +269,53 @@ public class SimManager : MonoBehaviour
         returning   = false;
         targetFound = false;
 
-        simulationStartTime = Time.unscaledTime;
+        simulationStartTime = Time.time;
+        missionEndTime      = 0f;
+
+        _foundByDroneName = "";
+        _foundByLeader    = false;
 
         StartAllSearch();
 
-        // Teks tombol boleh tetap "Play" (tidak toggle)
-        if (playText != null) playText.text = "Play";
+        if (playText != null) playText.text = "Stop";
         SetStatus("Searching...");
 
         LogState("StartSimulation-End");
     }
 
-    // Disimpan kalau nanti mau dipakai tombol Reset terpisah
     void StopSimulation()
     {
         Debug.Log("[SimManager] StopSimulation()");
         Flash(playImage, playIdle);
 
         isPlaying = false;
+        searching = false;
+        returning = false;
 
-        ResetSimulation(true);
+        // Hentikan semua drone (tanpa reset posisi / statistik)
+        if (drones != null)
+        {
+            foreach (var d in drones)
+            {
+                if (d == null) continue;
+
+                var rb = d.GetComponent<Rigidbody2D>();
+                if (rb == null) continue;
+
+#if UNITY_6000_0_OR_NEWER
+                rb.linearVelocity = Vector2.zero;
+#else
+                rb.velocity = Vector2.zero;
+#endif
+            }
+        }
 
         if (playText != null) playText.text = "Play";
+        SetStatus("Stopped. Press Play to start a new run.");
 
         LogState("StopSimulation-End");
     }
 
-    // =========================================================
-    //  RANDOMIZER (ONLY AT START)
-    // =========================================================
-    void RandomizeAll()
-    {
-        Debug.Log("[SimManager] RandomizeAll()");
-        RandomizeLeader();
-        RandomizeTarget();
-        InitRoles();
-    }
-
-    void RandomizeLeader()
-    {
-        if (drones == null || drones.Length == 0) return;
-
-        int idx = Random.Range(0, drones.Length);
-        Debug.Log("[SimManager] RandomizeLeader() -> " + idx);
-
-        for (int i = 0; i < drones.Length; i++)
-            drones[i].isLeader = (i == idx);
-    }
-
-    void RandomizeTarget()
-    {
-        if (targetObject == null || targetSpawns == null || targetSpawns.Length == 0)
-        {
-            if (objectText != null) objectText.text = "Object: None";
-            return;
-        }
-
-        int idx = Random.Range(0, targetSpawns.Length);
-        targetObject.position = targetSpawns[idx].position;
-
-        if (objectText != null)
-            objectText.text = $"Object: Room {idx + 1}";
-
-        Debug.Log("[SimManager] RandomizeTarget() -> Room " + (idx + 1));
-    }
-
-    // =========================================================
-    //  RESET
-    // =========================================================
     void ResetSimulation(bool showMessage)
     {
         Debug.Log("[SimManager] ResetSimulation(showMessage=" + showMessage + ")");
@@ -300,6 +339,7 @@ public class SimManager : MonoBehaviour
         }
         UpdateRoomsVisitedText();
 
+        // Reset tiap drone ke home
         if (drones != null)
         {
             foreach (var d in drones)
@@ -321,7 +361,6 @@ public class SimManager : MonoBehaviour
     void StartAllSearch()
     {
         if (drones == null) return;
-
         foreach (var d in drones)
             if (d != null)
                 d.StartSearch();
@@ -341,7 +380,10 @@ public class SimManager : MonoBehaviour
         returning   = true;
         returnTimer = 0f;
 
-        SetStatus($"{d.droneName} found target. Returning...");
+        _foundByDroneName = d != null ? d.droneName : "Unknown";
+        _foundByLeader    = (d != null && d.isLeader);
+
+        SetStatus($"{_foundByDroneName} found target. Returning...");
 
         foreach (var x in drones)
             if (x != null)
@@ -353,14 +395,20 @@ public class SimManager : MonoBehaviour
     public void OnDroneReachedHome(Drone d)
     {
         LogState("Before-OnDroneReachedHome");
-
         if (!returning || drones == null) return;
 
+        // Pastikan semua drone sudah di home
         foreach (var x in drones)
-            if (!x.IsAtHome) return;
+            if (!x.IsAtHome)
+                return;
 
         returning = false;
-        SetStatus("All drones at Home Base");
+        isPlaying = false;          // misi selesai → hentikan sampling otomatis
+        missionEndTime = Time.time;
+
+        SetStatus("All drones at Home Base (Mission Complete)");
+        if (playText != null) playText.text = "Play";
+
         LogState("After-OnDroneReachedHome");
     }
 
@@ -371,7 +419,6 @@ public class SimManager : MonoBehaviour
     {
         if (zone == null || d == null) return;
 
-        // Kalau belum pernah dikunjungi → tandai visited
         if (!zone.visited)
         {
             zone.visited = true;
@@ -391,8 +438,6 @@ public class SimManager : MonoBehaviour
     // =========================================================
     void UpdateTimers()
     {
-        if (!isPlaying) return;
-
         if (searching)
         {
             foundTimer += Time.deltaTime;
@@ -425,7 +470,7 @@ public class SimManager : MonoBehaviour
             return;
         }
 
-        int total = roomZones.Length;
+        int total        = roomZones.Length;
         int visitedCount = visitedRoomIds.Count;
 
         roomsVisitedText.text = $"Rooms visited: {visitedCount}/{total}";
@@ -454,7 +499,6 @@ public class SimManager : MonoBehaviour
                 break;
             }
         }
-
         if (leaderIndex < 0) leaderIndex = 0;
 
         foreach (var d in drones)
@@ -463,6 +507,42 @@ public class SimManager : MonoBehaviour
 
         if (leaderText != null)
             leaderText.text = $"Leader: Drone {leaderIndex + 1}";
+    }
+
+    void RandomizeAll()
+    {
+        Debug.Log("[SimManager] RandomizeAll()");
+        RandomizeLeader();
+        RandomizeTarget();
+        InitRoles();
+    }
+
+    void RandomizeLeader()
+    {
+        if (drones == null || drones.Length == 0) return;
+
+        int idx = Random.Range(0, drones.Length);
+        for (int i = 0; i < drones.Length; i++)
+            drones[i].isLeader = (i == idx);
+    }
+
+    void RandomizeTarget()
+    {
+        if (targetObject == null || targetSpawns == null || targetSpawns.Length == 0)
+        {
+            if (objectText != null) objectText.text = "Object: None";
+            _targetRoomIndex = -1;
+            return;
+        }
+
+        int idx = Random.Range(0, targetSpawns.Length);
+        targetObject.position = targetSpawns[idx].position;
+        _targetRoomIndex = idx;
+
+        if (objectText != null)
+            objectText.text = $"Object: Room {idx + 1}";
+
+        Debug.Log("[SimManager] RandomizeTarget() -> Room " + (idx + 1));
     }
 
     // =========================================================
@@ -487,5 +567,83 @@ public class SimManager : MonoBehaviour
         img.color = pressed;
         yield return new WaitForSecondsRealtime(0.15f);
         img.color = idle;
+    }
+
+    // =========================================================
+    //  EXPORT SPEED / DISTANCE KE CSV
+    // =========================================================
+    public void ExportSpeedCsv()
+    {
+        if (_sampleTimes == null || _sampleTimes.Count == 0)
+        {
+            Debug.LogWarning("[SimManager] ExportSpeedCsv(): no samples to export.");
+            return;
+        }
+
+        int nDrones = (drones != null) ? drones.Length : 0;
+        if (nDrones == 0)
+        {
+            Debug.LogWarning("[SimManager] ExportSpeedCsv(): no drones.");
+            return;
+        }
+
+        string dir = Path.Combine(Application.dataPath, "SimExports");
+        if (!Directory.Exists(dir))
+            Directory.CreateDirectory(dir);
+
+        string fileName = $"swarm_speed_{System.DateTime.Now:yyyyMMdd_HHmmss}.csv";
+        string path = Path.Combine(dir, fileName);
+
+        var sb = new StringBuilder();
+
+        // Meta info (diawali #)
+        float missionDuration =
+            (missionEndTime > simulationStartTime && simulationStartTime > 0f)
+            ? (missionEndTime - simulationStartTime)
+            : (_sampleTimes[_sampleTimes.Count - 1]);
+
+        sb.AppendLine("# Swarm drone mission log / speed & distance");
+        sb.AppendLine("# FoundBy," + _foundByDroneName);
+        sb.AppendLine("# FoundByIsLeader," + _foundByLeader);
+        sb.AppendLine("# TargetRoomIndex," + _targetRoomIndex);
+        sb.AppendLine("# MissionDuration," + missionDuration.ToString("F3") + " s");
+        sb.AppendLine();
+
+        // Header kolom
+        sb.Append("time");
+        for (int i = 0; i < nDrones; i++)
+        {
+            sb.Append($",speed_d{i + 1},dist_d{i + 1}");
+        }
+        sb.AppendLine();
+
+        // Isi data per sample
+        int sampleCount = _sampleTimes.Count;
+        for (int k = 0; k < sampleCount; k++)
+        {
+            sb.Append(_sampleTimes[k].ToString("F4"));
+
+            for (int i = 0; i < nDrones; i++)
+            {
+                float speed = 0f;
+                float dist  = 0f;
+
+                if (i < _speedHistory.Count && k < _speedHistory[i].Count)
+                    speed = _speedHistory[i][k];
+
+                if (i < _distanceHistory.Count && k < _distanceHistory[i].Count)
+                    dist = _distanceHistory[i][k];
+
+                sb.Append(",");
+                sb.Append(speed.ToString("F4"));
+                sb.Append(",");
+                sb.Append(dist.ToString("F4"));
+            }
+
+            sb.AppendLine();
+        }
+
+        File.WriteAllText(path, sb.ToString(), Encoding.UTF8);
+        Debug.Log($"[SimManager] ExportSpeedCsv() saved to: {path}");
     }
 }

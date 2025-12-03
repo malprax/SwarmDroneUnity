@@ -162,6 +162,14 @@ public class Drone : MonoBehaviour
     public Camera360Sensor camera360Sensor;
 
     // =========================================================
+    //  VELOCITY + DISTANCE TRACKING (STATISTIK)
+    // =========================================================
+    public Vector2 CurrentVelocity { get; private set; } = Vector2.zero;
+    public float TotalDistance { get; private set; } = 0f;
+
+    private Vector2 _lastPos;
+
+    // =========================================================
     //  DEBUG LOG
     // =========================================================
     [Header("Debug Navigation Logs")]
@@ -202,10 +210,11 @@ public class Drone : MonoBehaviour
     void Awake()
     {
         rb = GetComponent<Rigidbody2D>();
-        manager = FindObjectOfType<SimManager>();
+        manager = FindFirstObjectByType<SimManager>();
 
         homePosition = transform.position;
         lastPos = homePosition;
+        _lastPos = homePosition;
         atHome = true;
 
         wallLayer = LayerMask.NameToLayer("Wall");
@@ -332,11 +341,19 @@ public class Drone : MonoBehaviour
         edgeEscapeMode = false;
         stuckTurnCounter = 0;
 
+        _lastPos = transform.position;
+        CurrentVelocity = Vector2.zero;
+        TotalDistance = 0f;
+
         LogNav("[Mission] StartSearch()");
     }
 
     public void ResetDrone()
     {
+        _lastPos = transform.position;
+        CurrentVelocity = Vector2.zero;
+        TotalDistance = 0f;
+
         searching = false;
         returningHome = false;
         atHome = true;
@@ -395,6 +412,18 @@ public class Drone : MonoBehaviour
             ? (Vector2)positionSensor.transform.position   // bacaan sensor
             : physPos;
 
+        // Velocity estimasi (berdasarkan transform)
+        Vector2 currentPos = transform.position;
+        if (Time.deltaTime > 0f)
+        {
+            CurrentVelocity = (currentPos - _lastPos) / Time.deltaTime;
+        }
+        else
+        {
+            CurrentVelocity = Vector2.zero;
+        }
+        _lastPos = currentPos;
+
         // Tidak ada misi
         if (!searching && !returningHome)
         {
@@ -404,6 +433,7 @@ public class Drone : MonoBehaviour
             rb.velocity = Vector2.zero;
 #endif
             throttle = Mathf.MoveTowards(throttle, 0f, throttleResponse * Time.fixedDeltaTime);
+            CurrentVelocity = Vector2.zero;
             UpdateVisual(Vector2.zero);
             return;
         }
@@ -725,6 +755,12 @@ public class Drone : MonoBehaviour
 #else
         rb.velocity = vel;
 #endif
+
+        // Akumulasi jarak lintasan (hanya saat misi aktif)
+        if (searching || returningHome)
+        {
+            TotalDistance += (physPos - lastPos).magnitude;
+        }
 
         lastPos = physPos;
 
