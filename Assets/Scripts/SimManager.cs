@@ -1,793 +1,713 @@
-using System.Collections;
 using System.Collections.Generic;
-using System.IO;
-using System.Text;
 using UnityEngine;
-using UnityEngine.UI;
-using TMPro;
 
+[DisallowMultipleComponent]
 public class SimManager : MonoBehaviour
 {
     // =========================================================
-    //  PUBLIC REFERENCES
+    //  GLOBAL INSTANCE & STATE
     // =========================================================
+    public static SimManager Instance { get; private set; }
 
-    [Header("Drones")]
-    public Drone[] drones;
-
-    [Header("Target")]
-    public Transform targetObject;
-    public Transform[] targetSpawns;
-
-    [Header("Room Zones")]
-    [Tooltip("Daftar ruangan (boleh dikosongkan, akan auto-find).")]
-    public RoomZone[] roomZones;
-
-    [Header("UI: Text")]
-    public TMP_Text timeFoundText;
-    public TMP_Text timeReturnText;
-    public TMP_Text statusText;
-    public TMP_Text leaderText;
-    public TMP_Text objectText;
-    public TMP_Text roomsVisitedText;
-
-    // Debounce untuk tombol Play (mencegah double-click sangat cepat)
-    float lastPlayToggleTime = -999f;
-    public float playToggleCooldown = 0.2f; // dalam detik
-
-    [Header("Play Button")]
-    public Button playButton;
-    public Image playImage;
-    public TMP_Text playText;
+    [Header("Simulation Control")]
+    [Tooltip("Set true saat simulasi berjalan. Drone akan bergerak hanya jika IsPlaying == true.")]
+    [SerializeField] private bool isPlaying = false;
     public bool IsPlaying => isPlaying;
 
-    [Header("Colors")]
-    public Color playIdle = new Color(0.4f, 1f, 0.4f);
-    public Color pressed  = new Color(0.6f, 0.6f, 0.6f);
+    [Tooltip("Daftar semua drone di arena (boleh diisi manual atau auto-detect).")]
+    public List<Drone> drones = new List<Drone>();
 
-    [Header("Role Colors")]
-    public Color leaderColor = Color.red;
-    public Color memberColor = Color.cyan;
+    [Header("Home Base & Grid Navigation")]
+    [Tooltip("Transform HomeBase di tengah base (dipakai Drone & flood-fill).")]
+    public Transform homeBase;
 
+    [Tooltip("Ukuran sel grid (meter). Mis: 0.25–0.5")]
+    public float cellSize = 0.25f;
+
+    [Tooltip("Jumlah sel grid arah X (lebar arena).")]
+    public int gridWidth = 80;
+
+    [Tooltip("Jumlah sel grid arah Y (tinggi arena).")]
+    public int gridHeight = 80;
+
+    [Tooltip("Titik pusat (0,0) grid dalam koordinat dunia.")]
+    public Vector2 gridWorldCenter = Vector2.zero;
+
+    [Tooltip("Radius deteksi dinding saat membangun grid (untuk menandai sel sebagai wall).")]
+    public float wallCheckRadius = 0.1f;
+
+    [Tooltip("Layer yang dianggap dinding (harus sama dengan layer Wall pada Drone).")]
+    public LayerMask wallLayerMask;
+
+    // distanceField[x, y] = jarak langkah dari HomeBase (0 = home cell, -1 = tak terjangkau / wall)
+    private int[,] distanceField;
+
+
+    // Informasi memori untuk 1 sel grid
     // =========================================================
-    //  SPEED GRAPH / STATS
+    //  MICROMOUSE-STYLE CELL MEMORY
     // =========================================================
-    [Header("Speed Graph / Stats")]
-    [Tooltip("Batas atas grafik kecepatan (untuk normalisasi 0..1).")]
-    public float graphMaxSpeed = 4f;
-
-    // Riwayat waktu sample (detik sejak StartSimulation)
-    public List<float> SampleTimes => _sampleTimes;
-
-    // Riwayat kecepatan per-drone: SpeedHistory[droneIndex][sampleIndex]
-    public List<List<float>> SpeedHistory => _speedHistory;
-
-    // Riwayat jarak kumulatif per-drone (buat CSV)
-    public List<List<float>> DistanceHistory => _distanceHistory;
-
-    // =========================================================
-    //  GRID / MICROMOUSE-STYLE MAPPING
-    // =========================================================
-    [System.Serializable]
-    public class MazeCell
+    public class CellMemory
     {
-        public bool visited;
-        // dinding relatif terhadap orientasi drone saat pertama kali masuk
-        public bool wallL, wallR, wallF, wallB;
+        public bool visited = false;
+        public int visitCount = 0;
+        public int roomId = -1; // belum dikluster
     }
 
-    [System.Serializable]
-    public class GridStep
+    private Dictionary<Vector2Int, CellMemory> cellMemory = new();
+    // Debug: berapa cell yang sudah tersimpan di memori micromouse
+[SerializeField] private int debugCellMemoryCount = 0;
+
+    [Header("Room / Region Stats (Micromouse-style)")]
+    [Tooltip("Jumlah room (cluster) yang berhasil dibentuk dari sel-sel visited.")]
+    public int discoveredRoomCount = 0;
+        [Header("Micromouse Runtime")]
+    [Tooltip("Jika true, SimManager akan membentuk cluster room (roomId) secara berkala saat simulasi berjalan.")]
+    public bool autoClusterRooms = true;
+
+    [Tooltip("Interval (detik) untuk rebuild cluster room.")]
+    public float clusterRebuildInterval = 0.5f;
+
+    
+    [Tooltip("Ringkasan jumlah sel di setiap roomId.")]
+    public class RoomStats
     {
-        public int cellX;
-        public int cellY;
-        public bool wallL, wallR, wallF, wallB;
-        public string decision;   // FWD / LEFT / RIGHT / BACK / IDLE
-        public float time;        // waktu relatif dari start
+        public int roomId;
+        public int cellCount;
     }
 
-    [Header("Grid Mapping (Micromouse Style)")]
-    [Tooltip("Lebar grid (jumlah kolom).")]
-    public int gridWidth = 16;
+    // roomId → info ringkas (berapa sel dalam room)
+    private Dictionary<int, RoomStats> roomStats =
+        new Dictionary<int, RoomStats>();
 
-    [Tooltip("Tinggi grid (jumlah baris).")]
-    public int gridHeight = 10;
-
-    [Tooltip("Ukuran 1 sel grid (unit dunia).")]
-    public float cellSize = 1f;
-
-    [Tooltip("Posisi world untuk sel (0,0) grid. Atur kira-kira di pojok kiri bawah arena.")]
-    public Vector2 gridOrigin = new Vector2(-8f, -4f);
-
-    [Tooltip("Jarak maksimum dianggap ada tembok (dari sensor).")]
-    public float wallDetectDistance = 0.6f;
-
-    MazeCell[,] _maze;
-    List<GridStep> _allGridSteps = new List<GridStep>();
-    Dictionary<Drone, List<GridStep>> _routeByDrone = new Dictionary<Drone, List<GridStep>>();
-
-    // =========================================================
-    //  INTERNAL STATE
-    // =========================================================
-    bool isPlaying   = false;
-    bool searching   = false;
-    bool returning   = false;
-    bool targetFound = false;
-
-    float foundTimer  = 0f;
-    float returnTimer = 0f;
-
-    float simulationStartTime = 0f;
-    float missionEndTime      = 0f;
-
-    // Room visited
-    Dictionary<int, RoomZone> roomById  = new Dictionary<int, RoomZone>();
-    HashSet<int> visitedRoomIds         = new HashSet<int>();
-
-    // Speed history containers
-    List<float> _sampleTimes           = new List<float>();
-    List<List<float>> _speedHistory    = new List<List<float>>();
-    List<List<float>> _distanceHistory = new List<List<float>>();
-
-    // Meta info untuk CSV
-    string _foundByDroneName = "";
-    bool   _foundByLeader    = false;
-    int    _targetRoomIndex  = -1;
-
-    // =========================================================
-    //  LOG HELPER
-    // =========================================================
-    void LogState(string tag)
-    {
-        Debug.Log($"[SimManager:{tag}] " +
-                  $"isPlaying={isPlaying}, searching={searching}, returning={returning}, " +
-                  $"targetFound={targetFound}, foundTimer={foundTimer:0.00}, returnTimer={returnTimer:0.00}");
-    }
+    [Header("Debug Grid Logging")]
+    [Tooltip("Jika true, setiap langkah drone akan di-log detail.")]
+    public bool debugGridSteps = false;
 
     // =========================================================
     //  UNITY LIFECYCLE
     // =========================================================
+    void Awake()
+    {
+        // Singleton pattern
+        if (Instance != null && Instance != this)
+        {
+            Destroy(gameObject);
+            return;
+        }
+        Instance = this;
+
+        // Auto-collect drone kalau belum diisi (pakai API baru Unity)
+        if (drones == null || drones.Count == 0)
+        {
+            var found = FindObjectsByType<Drone>(FindObjectsSortMode.None);
+            drones = new List<Drone>(found);
+        }
+
+        // Build distance field flood-fill dari HomeBase
+        BuildDistanceFieldFromHome();
+    }
+
     void Start()
     {
-        Debug.Log("[SimManager] Start()");
-
-        Time.timeScale = 1f;
-
-        AutoAssignDrones();      // <<< BARU
-        AutoAssignTexts();
-        AssignDroneNames();
-        AutoCollectRooms();
-        RandomizeAll();
-        RebuildStatContainers();
-        ResetSimulation(true);
-        InitUI();
-
-        LogState("Start-End");
+        // Optional: mulai dalam keadaan berhenti
+        isPlaying = false;
     }
-
-    void Update()
-    {
-        if (!isPlaying) return;
-
-        UpdateTimers();
-        SampleSpeeds();
-    }
-
-   // =========================================================
-//  PLAY & STOP BUTTON (DIPISAH)
-// =========================================================
-public void OnPlayButton()
-{
-    // Debounce
-    float now = Time.unscaledTime;
-    if (now - lastPlayToggleTime < playToggleCooldown)
-    {
-        Debug.Log("[SimManager] OnPlayButton() ignored (debounce)");
-        return;
-    }
-    lastPlayToggleTime = now;
-
-    Debug.Log("[SimManager] OnPlayButton() clicked | isPlaying=" + isPlaying);
-
-    // HANYA start kalau belum jalan
-    if (!isPlaying)
-    {
-        StartSimulation();
-    }
-}
-
-public void OnStopButton()
-{
-    // Debounce juga, biar tidak spam
-    float now = Time.unscaledTime;
-    if (now - lastPlayToggleTime < playToggleCooldown)
-    {
-        Debug.Log("[SimManager] OnStopButton() ignored (debounce)");
-        return;
-    }
-    lastPlayToggleTime = now;
-
-    Debug.Log("[SimManager] OnStopButton() clicked | isPlaying=" + isPlaying);
-
-    if (isPlaying)
-    {
-        StopSimulation();   // <-- ini yang benar-benar memanggil StopSimulation
-    }
-}
 
     // =========================================================
-    //  INIT / SETUP
+    //  PUBLIC CONTROL (dipanggil dari UI / tombol / keyboard)
     // =========================================================
-    void AutoAssignTexts()
+    public void StartSimulation()
     {
-        if (playText == null && playButton != null)
-            playText = playButton.GetComponentInChildren<TMP_Text>(true);
+        isPlaying = true;
 
-        Debug.Log("[SimManager] AutoAssignTexts()");
-    }
-
-    void AutoAssignDrones()
-    {
-        // Kalau di Inspector sudah diisi, jangan diubah
-        if (drones != null && drones.Length > 0) return;
-
-        // Cari semua Drone yang aktif di scene
-        drones = FindObjectsByType<Drone>(FindObjectsSortMode.None);
-
-        if (drones == null) drones = new Drone[0];
-
-        Debug.Log("[SimManager] AutoAssignDrones() -> found " + drones.Length + " drones");
-    }
-
-    void AssignDroneNames()
-    {
-        Debug.Log("[SimManager] AssignDroneNames()");
-        if (drones == null) return;
-
-        for (int i = 0; i < drones.Length; i++)
+        // semua drone mulai search
+        foreach (var d in drones)
         {
-            if (drones[i] != null)
-                drones[i].droneName = $"Drone {i + 1}";
-        }
-    }
-
-    void AutoCollectRooms()
-    {
-        // Pakai API baru: FindObjectsByType (menghindari warning CS0618)
-        if (roomZones == null || roomZones.Length == 0)
-        {
-            roomZones = FindObjectsByType<RoomZone>(FindObjectsSortMode.None);
+            if (d == null) continue;
+            d.StartSearch();
         }
 
-        roomById.Clear();
-        visitedRoomIds.Clear();
+        Debug.Log("[SimManager] StartSimulation()");
+    }
 
-        if (roomZones != null)
+    public void StopSimulation()
+    {
+        isPlaying = false;
+
+        foreach (var d in drones)
         {
-            foreach (var rz in roomZones)
-            {
-                if (rz == null) continue;
-
-                if (!roomById.ContainsKey(rz.roomId))
-                    roomById.Add(rz.roomId, rz);
-                else
-                    Debug.LogWarning($"[SimManager] Duplicate RoomId={rz.roomId} on {rz.name}");
-
-                rz.visited = false;
-            }
+            if (d == null) continue;
+            d.StopDrone();
         }
 
-        UpdateRoomsVisitedText();
-        Debug.Log($"[SimManager] AutoCollectRooms() -> found {roomById.Count} rooms");
+        // Setelah simulasi berhenti, bentuk cluster room dari memori jelajah
+        RebuildRoomClusters();
+
+        Debug.Log("[SimManager] StopSimulation()");
     }
 
-    void InitUI()
-    {
-        Debug.Log("[SimManager] InitUI()");
-
-        if (playImage != null) playImage.color = playIdle;
-        if (playText  != null) playText.text  = "Play";
-
-        SetStatus("Press Play to start.");
-        UpdateTimerText();
-        UpdateRoomsVisitedText();
-    }
-
-    // =========================================================
-    //  MAZE / GRID INIT
-    // =========================================================
-    void InitMaze()
-    {
-        _maze = new MazeCell[gridWidth, gridHeight];
-        for (int x = 0; x < gridWidth; x++)
-        {
-            for (int y = 0; y < gridHeight; y++)
-            {
-                _maze[x, y] = new MazeCell();
-            }
-        }
-
-        _allGridSteps.Clear();
-        _routeByDrone.Clear();
-    }
-
-    // Convert world position ke indeks grid (0..gridWidth-1, 0..gridHeight-1)
-    bool WorldToCell(Vector2 worldPos, out int ix, out int iy)
-    {
-        float lx = (worldPos.x - gridOrigin.x) / cellSize;
-        float ly = (worldPos.y - gridOrigin.y) / cellSize;
-
-        ix = Mathf.FloorToInt(lx);
-        iy = Mathf.FloorToInt(ly);
-
-        if (ix < 0 || ix >= gridWidth || iy < 0 || iy >= gridHeight)
-            return false;
-
-        return true;
-    }
-
-    static int Bool01(bool b) => b ? 1 : 0;
-
-    // =========================================================
-    //  MICROMOUSE-STYLE GRID LOG
-    // =========================================================
-    [Header("Grid / Micromouse Logging")]
-    public bool enableGridLog = true;
-
-    public void ReportGridStep(
-        Drone d,
-        Vector2 sensedPos,
-        float dFront, float dRight, float dBack, float dLeft,
-        string decisionLabel)
-    {
-        if (!enableGridLog) return;
-        if (d == null) return;
-
-        // Pakai cellSize & gridOrigin dari konfigurasi grid di atas
-        float cell = cellSize;
-        Vector2 origin = gridOrigin;
-
-        int cx = Mathf.RoundToInt((sensedPos.x - origin.x) / cell);
-        int cy = Mathf.RoundToInt((sensedPos.y - origin.y) / cell);
-
-        const float wallThresh = 0.8f;
-        int wL = (dLeft  < wallThresh) ? 1 : 0;
-        int wR = (dRight < wallThresh) ? 1 : 0;
-        int wF = (dFront < wallThresh) ? 1 : 0;
-        int wB = (dBack  < wallThresh) ? 1 : 0;
-
-        Debug.Log($"[GridStep] {d.droneName} cell=({cx},{cy}) " +
-                  $"walls L={wL},R={wR},F={wF},B={wB} decision={decisionLabel}");
-    }
-
-    // =========================================================
-    //  STATS CONTAINERS (SPEED / DISTANCE)
-    // =========================================================
-    void RebuildStatContainers()
-    {
-        _sampleTimes = new List<float>();
-        _speedHistory = new List<List<float>>();
-        _distanceHistory = new List<List<float>>();
-
-        int n = (drones != null) ? drones.Length : 0;
-        for (int i = 0; i < n; i++)
-        {
-            _speedHistory.Add(new List<float>());
-            _distanceHistory.Add(new List<float>());
-        }
-    }
-
-    void SampleSpeeds()
-    {
-        if (drones == null || _speedHistory == null) return;
-        if (_speedHistory.Count != drones.Length) return;
-
-        float t = Time.time - simulationStartTime;
-        float dt = (_sampleTimes.Count == 0) ? 0f : (t - _sampleTimes[_sampleTimes.Count - 1]);
-
-        _sampleTimes.Add(t);
-
-        for (int i = 0; i < drones.Length; i++)
-        {
-            float speed = 0f;
-            if (drones[i] != null)
-                speed = drones[i].CurrentVelocity.magnitude;
-
-            _speedHistory[i].Add(speed);
-
-            // jarak kumulatif = jarak sebelumnya + v * dt
-            float lastDist = (_distanceHistory[i].Count > 0) ? _distanceHistory[i][_distanceHistory[i].Count - 1] : 0f;
-            float newDist  = lastDist + speed * dt;
-            _distanceHistory[i].Add(newDist);
-        }
-    }
-
-    // =========================================================
-    //  SIMULATION LIFECYCLE
-    // =========================================================
-    void StartSimulation()
-{
-    Debug.Log("[SimManager] StartSimulation()");
-    Flash(playImage, playIdle);
-
-    InitMaze();
-    RebuildStatContainers();
-    ResetSimulation(false);
-
-    isPlaying   = true;
-    searching   = true;
-    returning   = false;
-    targetFound = false;
-
-    simulationStartTime = Time.time;
-    missionEndTime      = 0f;
-
-    _foundByDroneName = "";
-    _foundByLeader    = false;
-
-    StartAllSearch();
-    SetStatus("Searching...");
-
-    LogState("StartSimulation-End");
-}
-
-void StopSimulation()
-{
-    Debug.Log("[SimManager] StopSimulation()");
-    Flash(playImage, playIdle);
-
-    isPlaying = false;
-    searching = false;
-    returning = false;
-
-    if (drones != null)
+    public void ResetAllDrones()
     {
         foreach (var d in drones)
         {
             if (d == null) continue;
-            var rb = d.GetComponent<Rigidbody2D>();
-            if (rb == null) continue;
-
-#if UNITY_6000_0_OR_NEWER
-            rb.linearVelocity = Vector2.zero;
-#else
-            rb.velocity = Vector2.zero;
-#endif
+            d.ResetDrone();
         }
+
+        Debug.Log("[SimManager] ResetAllDrones()");
     }
 
-    SetStatus("Stopped. Press Play to start a new run.");
-    LogState("StopSimulation-End");
-}
 
-    void ResetSimulation(bool showMessage)
+    public void CommandAllReturnHome()
     {
-        Debug.Log("[SimManager] ResetSimulation(showMessage=" + showMessage + ")");
-
-        searching   = false;
-        returning   = false;
-        targetFound = false;
-
-        foundTimer  = 0f;
-        returnTimer = 0f;
-
-        // Reset visited rooms
-        visitedRoomIds.Clear();
-        if (roomZones != null)
+        foreach (var d in drones)
         {
-            foreach (var rz in roomZones)
+            if (d == null) continue;
+            d.StartReturnMission();
+        }
+
+        Debug.Log("[SimManager] CommandAllReturnHome()");
+    }
+
+
+    private float clusterTimer = 0f;
+
+    void Update()
+    {
+        // Rebuild cluster room Micromouse secara berkala
+        if (autoClusterRooms)
+        {
+            clusterTimer += Time.deltaTime;
+            if (clusterTimer >= clusterRebuildInterval)
             {
-                if (rz == null) continue;
-                rz.visited = false;
+                clusterTimer = 0f;
+                AssignRoomIds();  // ini akan mengubah mem.roomId untuk sel yang visited
             }
         }
-        UpdateRoomsVisitedText();
+    }
 
-        // Reset tiap drone ke home
-        if (drones != null)
+    // OPTIONAL (dipakai RoomZone)
+    public void OnDroneEnterRoom(Drone drone, int roomIndex)
+    {
+        if (drone == null) return;
+        Debug.Log($"[SimManager] Drone {drone.droneName} memasuki Room {roomIndex}");
+        // Nanti bisa dikembangkan: statistik waktu per room, dsb.
+    }
+
+    // =========================================================
+    //  GRID COORD UTILITIES
+    // =========================================================
+    Vector2Int WorldToGrid(Vector2 worldPos)
+    {
+        // Geser supaya grid center jadi (0,0)
+        Vector2 local = worldPos - gridWorldCenter;
+
+        int gx = Mathf.RoundToInt(local.x / cellSize) + gridWidth / 2;
+        int gy = Mathf.RoundToInt(local.y / cellSize) + gridHeight / 2;
+
+        return new Vector2Int(gx, gy);
+    }
+
+    Vector2 GridToWorldCenter(Vector2Int cell)
+    {
+        float x = (cell.x - gridWidth / 2) * cellSize;
+        float y = (cell.y - gridHeight / 2) * cellSize;
+
+        return gridWorldCenter + new Vector2(x, y);
+    }
+
+    bool IsInsideGrid(Vector2Int c)
+    {
+        return c.x >= 0 && c.x < gridWidth && c.y >= 0 && c.y < gridHeight;
+    }
+
+    bool IsCellWall(Vector2Int c)
+    {
+        if (!IsInsideGrid(c)) return true;
+
+        // Sel dianggap wall jika ada collider pada wallLayerMask di radius kecil
+        Vector2 center = GridToWorldCenter(c);
+        Collider2D col = Physics2D.OverlapCircle(center, wallCheckRadius, wallLayerMask);
+        return col != null;
+    }
+
+    // =========================================================
+    //  BUILD FLOOD-FILL DISTANCE FIELD (HOME AS GOAL)
+    // =========================================================
+    public void BuildDistanceFieldFromHome()
+    {
+        if (homeBase == null)
         {
-            foreach (var d in drones)
-                if (d != null)
-                    d.ResetDrone();
+            Debug.LogWarning("[SimManager] homeBase belum di-assign. Flood-fill skip.");
+            distanceField = null;
+            return;
         }
 
-        UpdateTimerText();
-
-        if (showMessage)
-            SetStatus("Press Play to start.");
-
-        LogState("ResetSimulation-End");
-    }
-
-    // =========================================================
-    //  DRONE CALLBACKS
-    // =========================================================
-    void StartAllSearch()
-    {
-        if (drones == null) return;
-        foreach (var d in drones)
-            if (d != null)
-                d.StartSearch();
-
-        Debug.Log("[SimManager] StartAllSearch()");
-    }
-
-    public void OnDroneFoundTarget(Drone d)
-    {
-        if (targetFound) return;
-
-        Debug.Log("[SimManager] OnDroneFoundTarget() by " + (d != null ? d.droneName : "null"));
-        LogState("Before-OnDroneFoundTarget");
-
-        targetFound = true;
-        searching   = false;
-        returning   = true;
-        returnTimer = 0f;
-
-        _foundByDroneName = d != null ? d.droneName : "Unknown";
-        _foundByLeader    = (d != null && d.isLeader);
-
-        SetStatus($"{_foundByDroneName} found target. Returning...");
-
-        foreach (var x in drones)
-            if (x != null)
-                x.ReturnHome();
-
-        LogState("After-OnDroneFoundTarget");
-    }
-
-    public void OnDroneReachedHome(Drone d)
-    {
-        LogState("Before-OnDroneReachedHome");
-        if (!returning || drones == null) return;
-
-        // Pastikan semua drone sudah di home
-        foreach (var x in drones)
-            if (!x.IsAtHome)
-                return;
-
-        returning = false;
-        isPlaying = false;          // misi selesai → hentikan sampling otomatis
-        missionEndTime = Time.time;
-
-        SetStatus("All drones at Home Base (Mission Complete)");
-        if (playText != null) playText.text = "Play";
-
-        LogState("After-OnDroneReachedHome");
-    }
-
-    /// <summary>
-    /// Dipanggil oleh RoomZone saat Drone masuk trigger ruangan.
-    /// </summary>
-    public void OnDroneEnterRoom(RoomZone zone, Drone d)
-    {
-        if (zone == null || d == null) return;
-
-        if (!zone.visited)
+        distanceField = new int[gridWidth, gridHeight];
+        for (int x = 0; x < gridWidth; x++)
         {
-            zone.visited = true;
-            visitedRoomIds.Add(zone.roomId);
+            for (int y = 0; y < gridHeight; y++)
+            {
+                distanceField[x, y] = -1; // -1 = belum dikunjungi / tak terjangkau
+            }
+        }
 
-            Debug.Log($"[SimManager] Room visited: {zone.roomName} (Id={zone.roomId}) by {d.droneName}");
-            UpdateRoomsVisitedText();
+        Vector2Int homeCell = WorldToGrid(homeBase.position);
+        if (!IsInsideGrid(homeCell))
+        {
+            Debug.LogWarning($"[SimManager] HomeBase di luar grid: {homeCell}");
+            return;
+        }
+
+        // BFS queue
+        Queue<Vector2Int> q = new Queue<Vector2Int>();
+
+        if (!IsCellWall(homeCell))
+        {
+            distanceField[homeCell.x, homeCell.y] = 0;
+            q.Enqueue(homeCell);
         }
         else
         {
-            Debug.Log($"[SimManager] {d.droneName} re-entered room: {zone.roomName} (Id={zone.roomId})");
-        }
-    }
-
-    // =========================================================
-    //  TIMERS
-    // =========================================================
-    void UpdateTimers()
-    {
-        if (searching)
-        {
-            foundTimer += Time.deltaTime;
-            UpdateTimerText();
-        }
-
-        if (returning)
-        {
-            returnTimer += Time.deltaTime;
-            UpdateTimerText();
-        }
-    }
-
-    void UpdateTimerText()
-    {
-        if (timeFoundText != null)
-            timeFoundText.text = $"Found: {foundTimer:0.0} s";
-
-        if (timeReturnText != null)
-            timeReturnText.text = $"Return: {returnTimer:0.0} s";
-    }
-
-    void UpdateRoomsVisitedText()
-    {
-        if (roomsVisitedText == null) return;
-
-        if (roomZones == null || roomZones.Length == 0)
-        {
-            roomsVisitedText.text = "Rooms: (none)";
+            Debug.LogWarning("[SimManager] HomeBase berada di dalam wall cell menurut deteksi grid.");
             return;
         }
 
-        int total        = roomZones.Length;
-        int visitedCount = visitedRoomIds.Count;
-
-        roomsVisitedText.text = $"Rooms visited: {visitedCount}/{total}";
-    }
-
-    // =========================================================
-    //  ROLES
-    // =========================================================
-    void InitRoles()
-    {
-        Debug.Log("[SimManager] InitRoles()");
-
-        if (drones == null || drones.Length == 0)
+        // 4-neighborhood (up, down, left, right)
+        Vector2Int[] dirs = new Vector2Int[]
         {
-            if (leaderText != null)
-                leaderText.text = "Leader: None";
-            return;
-        }
+            new Vector2Int( 1, 0),
+            new Vector2Int(-1, 0),
+            new Vector2Int( 0, 1),
+            new Vector2Int( 0,-1)
+        };
 
-        int leaderIndex = -1;
-        for (int i = 0; i < drones.Length; i++)
+        while (q.Count > 0)
         {
-            if (drones[i] != null && drones[i].isLeader)
+            Vector2Int c = q.Dequeue();
+            int cd = distanceField[c.x, c.y];
+
+            foreach (var d in dirs)
             {
-                leaderIndex = i;
+                Vector2Int n = c + d;
+                if (!IsInsideGrid(n)) continue;
+                if (distanceField[n.x, n.y] != -1) continue; // sudah dikunjungi
+                if (IsCellWall(n)) continue;
+
+                distanceField[n.x, n.y] = cd + 1;
+                q.Enqueue(n);
+            }
+        }
+
+        Debug.Log("[SimManager] distanceField flood-fill selesai dibangun.");
+    }
+
+    // =========================================================
+    //  ARAH PULANG UNTUK DRONE (DIPAKAI DI Drone.HandleReturnHome)
+    // =========================================================
+    /// <summary>
+    /// Mengembalikan vektor arah menuju home berdasarkan distanceField.
+    /// Hanya dipakai saat fase Returning.
+    /// </summary>
+    public Vector2 GetReturnDirectionFor(Drone drone, Vector2 sensedPos)
+    {
+        if (distanceField == null || homeBase == null)
+            return Vector2.zero;
+
+        Vector2Int cell = WorldToGrid(sensedPos);
+        if (!IsInsideGrid(cell))
+            return Vector2.zero;
+
+        int curDist = distanceField[cell.x, cell.y];
+        if (curDist < 0)
+            return Vector2.zero;
+
+        // Cari neighbor dengan distance lebih kecil (mendekati home)
+        Vector2Int bestNeighbor = cell;
+        int bestDist = curDist;
+
+        Vector2Int[] dirs = new Vector2Int[]
+        {
+            new Vector2Int( 1, 0),
+            new Vector2Int(-1, 0),
+            new Vector2Int( 0, 1),
+            new Vector2Int( 0,-1)
+        };
+
+        foreach (var d in dirs)
+        {
+            Vector2Int n = cell + d;
+            if (!IsInsideGrid(n)) continue;
+
+            int nd = distanceField[n.x, n.y];
+            if (nd >= 0 && nd < bestDist)
+            {
+                bestDist = nd;
+                bestNeighbor = n;
+            }
+        }
+
+        if (bestNeighbor == cell)
+        {
+            // Tidak ada neighbor yang lebih dekat (mungkin sudah di home cell)
+            return Vector2.zero;
+        }
+
+        Vector2 worldBest = GridToWorldCenter(bestNeighbor);
+        Vector2 dir = worldBest - sensedPos;
+        if (dir.sqrMagnitude < 1e-4f)
+            return Vector2.zero;
+
+        return dir.normalized;
+    }
+
+    // =========================================================
+    //  MICROMOUSE MEMORY API
+    // =========================================================
+    /// <summary>
+    /// Tandai cell grid yang sesuai posisi dunia sebagai "visited".
+    /// Dipanggil oleh ReportGridStep() setiap kali drone melaporkan langkah.
+    /// </summary>
+    public void MarkVisitedCell(Vector2 worldPos)
+{
+    Vector2Int cell = WorldToGrid(worldPos);
+
+    if (!IsInsideGrid(cell)) {
+        Debug.Log($"[Micromouse] OUTSIDE GRID: world={worldPos} cell={cell}");
+        return;
+    }
+
+    if (IsCellWall(cell)) {
+        Debug.Log($"[Micromouse] CELL IS WALL: {cell}");
+        return;
+    }
+
+    if (!cellMemory.TryGetValue(cell, out var mem))
+    {
+        mem = new CellMemory();
+        cellMemory[cell] = mem;
+        Debug.Log($"[Micromouse] NEW CELL: {cell}");
+    }
+
+    mem.visited = true;
+    mem.visitCount++;
+
+    debugCellMemoryCount = cellMemory.Count;
+}
+           /// <summary>
+    /// Update memori sel berdasarkan posisi drone dan pembacaan sensor.
+    /// 
+    /// - Argumen WAJIB:
+    ///     sensedPos : posisi drone (world space)
+    ///     dFront    : jarak sensor depan
+    ///     dRight    : jarak sensor kanan
+    ///     dBack     : jarak sensor belakang
+    ///     dLeft     : jarak sensor kiri
+    ///
+    /// - Argumen OPSIONAL (tambahan dari versi lama):
+    ///     extra     : bisa berisi apa saja (string topo, state, dsb).
+    ///                 Kita abaikan dulu, supaya kompatibel dengan semua
+    ///                 versi Drone.cs yang pernah memanggil fungsi ini.
+    ///
+    /// Dipanggil dari Drone.FixedUpdate(). Saat ini minimal:
+    ///     → menandai cell tempat drone berada sebagai visited.
+    /// Nanti bisa dikembangkan untuk:
+    ///     → menyimpan info dinding di 4 arah (N/E/S/W) ala micromouse.
+    /// </summary>
+    public void UpdateCellFromSensors(
+        Vector2 sensedPos,
+        float dFront, float dRight, float dBack, float dLeft,
+        params object[] extra
+    )
+    {
+        // Versi sederhana: cukup tandai cell yang sedang dioccupy sebagai visited.
+        MarkVisitedCell(sensedPos);
+
+        // NOTE:
+        // 'extra' kita abaikan dulu. Di masa depan kita bisa pakai:
+        // - extra[0] = topology (Open/Corridor/LeftWall/RightWall)
+        // - extra[1] = mission state / semacamnya
+        // - dst.
+    }
+
+    /// <summary>
+    /// Mengambil roomId di posisi dunia tertentu.
+    /// -1 jika belum pernah dikunjungi atau belum dibentuk cluster.
+    /// </summary>
+    public int GetRoomIdAtWorldPos(Vector2 worldPos)
+    {
+        Vector2Int cell = WorldToGrid(worldPos);
+        if (!cellMemory.TryGetValue(cell, out var mem)) return -1;
+        if (!mem.visited) return -1;
+        return mem.roomId;
+    }
+    /// <summary>
+/// Mengambil berapa kali cell di posisi dunia ini sudah dikunjungi drone.
+/// Jika belum pernah, akan mengembalikan 0.
+/// </summary>
+public int GetVisitCountAtWorldPos(Vector2 worldPos)
+{
+    Vector2Int cell = WorldToGrid(worldPos);
+    if (!cellMemory.TryGetValue(cell, out var mem)) return 0;
+    return mem.visitCount;
+}
+    private void AssignRoomIds()
+{
+    // Jangan cluster kalau belum ada cell yang dikunjungi
+    if (cellMemory.Count == 0)
+    {
+        discoveredRoomCount = 0;
+        return;
+    }
+
+    // reset semua roomId dulu
+    foreach (var kv in cellMemory)
+    {
+        kv.Value.roomId = -1;
+    }
+
+    // cluster id berjalan
+    int nextRoomId = 0;
+
+    // flood-fill manual
+    foreach (var kv in cellMemory)
+    {
+        Vector2Int start = kv.Key;
+        CellMemory mem = kv.Value;
+
+        if (!mem.visited) continue;
+        if (mem.roomId != -1) continue; // sudah dikluster
+
+        // buat cluster baru
+        FloodFillRoom(start, nextRoomId);
+        nextRoomId++;
+    }
+
+    discoveredRoomCount = nextRoomId;
+    Debug.Log($"[Micromouse] Room clustering selesai. totalRoom={discoveredRoomCount}");
+}
+private void FloodFillRoom(Vector2Int start, int roomId)
+{
+    Queue<Vector2Int> q = new();
+    q.Enqueue(start);
+
+    // assign ke cell awal
+    if (cellMemory.TryGetValue(start, out var m0))
+        m0.roomId = roomId;
+
+    Vector2Int[] dirs = new Vector2Int[]
+    {
+        new Vector2Int( 1, 0),
+        new Vector2Int(-1, 0),
+        new Vector2Int( 0, 1),
+        new Vector2Int( 0,-1)
+    };
+
+    while (q.Count > 0)
+    {
+        Vector2Int c = q.Dequeue();
+
+        foreach (var d in dirs)
+        {
+            Vector2Int n = c + d;
+            if (!cellMemory.TryGetValue(n, out var mem)) continue;
+            if (!mem.visited) continue;
+            if (mem.roomId != -1) continue;
+
+            mem.roomId = roomId;
+            q.Enqueue(n);
+        }
+    }
+}
+
+        // =========================================================
+    //  ROOM CLUSTERING (MICROMOUSE-STYLE)
+    // =========================================================
+    /// <summary>
+    /// Membentuk cluster room dari sel-sel visited.
+    /// Setiap cluster diberi roomId (0,1,2,...) dan dihitung jumlah selnya.
+    /// </summary>
+    public void RebuildRoomClusters()
+    {
+        // Reset hitungan room & summary
+        discoveredRoomCount = 0;
+        roomStats.Clear();
+
+        if (cellMemory == null || cellMemory.Count == 0)
+        {
+            Debug.Log("[SimManager] RebuildRoomClusters: belum ada sel visited.");
+            return;
+        }
+
+        // 1) Reset semua roomId ke -1 dulu
+        foreach (var kvp in cellMemory)
+        {
+            CellMemory mem = kvp.Value;
+            if (mem != null)
+            {
+                mem.roomId = -1;
+            }
+        }
+
+        // Neighbor 4-arah (atas, bawah, kiri, kanan)
+        Vector2Int[] dirs = new Vector2Int[]
+        {
+            new Vector2Int( 1, 0),
+            new Vector2Int(-1, 0),
+            new Vector2Int( 0, 1),
+            new Vector2Int( 0,-1)
+        };
+
+        // 2) Scan semua sel visited, bentuk cluster BFS
+        foreach (var kvp in cellMemory)
+        {
+            Vector2Int startCell = kvp.Key;
+            CellMemory startMem = kvp.Value;
+
+            // Hanya mulai cluster dari sel yang visited dan belum punya roomId
+            if (startMem == null) continue;
+            if (!startMem.visited) continue;
+            if (startMem.roomId >= 0) continue;
+
+            int currentRoomId = discoveredRoomCount;
+            discoveredRoomCount++;
+
+            // Buat RoomStats baru
+            RoomStats stats = new RoomStats();
+            stats.roomId = currentRoomId;
+            stats.cellCount = 0;
+            roomStats[currentRoomId] = stats;
+
+            // BFS queue
+            Queue<Vector2Int> q = new Queue<Vector2Int>();
+            startMem.roomId = currentRoomId;
+            q.Enqueue(startCell);
+            stats.cellCount++;
+
+            while (q.Count > 0)
+            {
+                Vector2Int c = q.Dequeue();
+
+                foreach (var d in dirs)
+                {
+                    Vector2Int n = c + d;
+
+                    if (!cellMemory.TryGetValue(n, out var nMem)) continue;
+                    if (nMem == null) continue;
+                    if (!nMem.visited) continue;
+                    if (nMem.roomId >= 0) continue;
+
+                    nMem.roomId = currentRoomId;
+                    q.Enqueue(n);
+                    stats.cellCount++;
+                }
+            }
+        }
+
+        Debug.Log($"[SimManager] RebuildRoomClusters selesai. discoveredRoomCount={discoveredRoomCount}");
+
+        foreach (var kvp in roomStats)
+        {
+            Debug.Log($"[SimManager] Room {kvp.Key} cellCount={kvp.Value.cellCount}");
+        }
+    }
+
+    // =========================================================
+    //  GRID STEP LOGGING (MICROMOUSE-STYLE)
+    // =========================================================
+    /// <summary>
+    /// Dipanggil Drone setiap step untuk mencatat sensor & keputusan ke grid.
+    /// </summary>
+    public void ReportGridStep(
+    Drone drone,
+    Vector2 sensedPos,
+    float dFront, float dRight, float dBack, float dLeft,
+    string decisionLabel)
+{
+    // WAJIB: selalu tandai cell visited dulu
+    MarkVisitedCell(sensedPos);
+
+    // Jika debug dimatikan, jangan log
+    if (!debugGridSteps) return;
+
+    string name = drone != null ? drone.droneName : "Unknown";
+
+    Debug.Log(
+        $"[GridStep:{name}] pos=({sensedPos.x:F2},{sensedPos.y:F2}) " +
+        $"dF={dFront:F2} dR={dRight:F2} dB={dBack:F2} dL={dLeft:F2} " +
+        $"dec={decisionLabel}"
+    );
+}
+
+    // =========================================================
+    //  EVENTS FROM DRONE
+    // =========================================================
+    public void OnDroneFoundTarget(Drone drone)
+    {
+        if (drone == null) return;
+
+        Debug.Log($"[SimManager] Drone {drone.droneName} menemukan target.");
+        // Nanti bisa: tandai waktu, suruh drone lain pulang, dsb.
+    }
+
+    public void OnDroneReachedHome(Drone drone)
+    {
+        if (drone == null) return;
+
+        Debug.Log($"[SimManager] Drone {drone.droneName} sudah sampai HomeBase.");
+
+        // Cek apakah semua drone sudah di rumah
+        bool allHome = true;
+        foreach (var d in drones)
+        {
+            if (d == null) continue;
+            if (!d.IsAtHome)
+            {
+                allHome = false;
                 break;
             }
         }
-        if (leaderIndex < 0) leaderIndex = 0;
 
-        foreach (var d in drones)
-            if (d != null)
-                d.ApplyRoleVisual(leaderColor, memberColor);
-
-        if (leaderText != null)
-            leaderText.text = $"Leader: Drone {leaderIndex + 1}";
-    }
-
-    void RandomizeAll()
-    {
-        Debug.Log("[SimManager] RandomizeAll()");
-        RandomizeLeader();
-        RandomizeTarget();
-        InitRoles();
-    }
-
-    void RandomizeLeader()
-    {
-        if (drones == null || drones.Length == 0) return;
-
-        int idx = Random.Range(0, drones.Length);
-        for (int i = 0; i < drones.Length; i++)
-            drones[i].isLeader = (i == idx);
-    }
-
-    void RandomizeTarget()
-    {
-        if (targetObject == null || targetSpawns == null || targetSpawns.Length == 0)
+        if (allHome)
         {
-            if (objectText != null) objectText.text = "Object: None";
-            _targetRoomIndex = -1;
-            return;
+            Debug.Log("[SimManager] Semua drone sudah kembali ke HomeBase. Simulasi dapat dihentikan.");
+            // Optional: auto stop
+            // isPlaying = false;
         }
-
-        int idx = Random.Range(0, targetSpawns.Length);
-        targetObject.position = targetSpawns[idx].position;
-        _targetRoomIndex = idx;
-
-        if (objectText != null)
-            objectText.text = $"Object: Room {idx + 1}";
-
-        Debug.Log("[SimManager] RandomizeTarget() -> Room " + (idx + 1));
     }
 
+#if UNITY_EDITOR
     // =========================================================
-    //  UI HELPERS
+    //  GIZMOS UNTUK GRID & HOME
     // =========================================================
-    void SetStatus(string msg)
+    void OnDrawGizmosSelected()
     {
-        if (statusText != null)
-            statusText.text = msg;
-
-        Debug.Log("[SimManager] STATUS: " + msg);
-    }
-
-    void Flash(Image img, Color idle)
-    {
-        if (img == null) return;
-        StartCoroutine(FlashRoutine(img, idle));
-    }
-
-    IEnumerator FlashRoutine(Image img, Color idle)
-    {
-        img.color = pressed;
-        yield return new WaitForSecondsRealtime(0.15f);
-        img.color = idle;
-    }
-
-    // =========================================================
-    //  EXPORT SPEED / DISTANCE KE CSV
-    // =========================================================
-    public void ExportSpeedCsv()
-    {
-        if (_sampleTimes == null || _sampleTimes.Count == 0)
+        if (homeBase != null)
         {
-            Debug.LogWarning("[SimManager] ExportSpeedCsv(): no samples to export.");
-            return;
+            Gizmos.color = Color.green;
+            Gizmos.DrawSphere(homeBase.position, 0.1f);
         }
 
-        int nDrones = (drones != null) ? drones.Length : 0;
-        if (nDrones == 0)
-        {
-            Debug.LogWarning("[SimManager] ExportSpeedCsv(): no drones.");
-            return;
-        }
+        // Gambarkan outline grid kasar (tidak semua sel, biar tidak berat)
+        Gizmos.color = new Color(1f, 1f, 0f, 0.15f);
 
-        string dir = Path.Combine(Application.dataPath, "SimExports");
-        if (!Directory.Exists(dir))
-            Directory.CreateDirectory(dir);
+        float w = gridWidth * cellSize;
+        float h = gridHeight * cellSize;
 
-        string fileName = $"swarm_speed_{System.DateTime.Now:yyyyMMdd_HHmmss}.csv";
-        string path = Path.Combine(dir, fileName);
+        Vector3 bottomLeft = new Vector3(
+            gridWorldCenter.x - w / 2f,
+            gridWorldCenter.y - h / 2f,
+            0f
+        );
+        Vector3 topLeft = bottomLeft + new Vector3(0f, h, 0f);
+        Vector3 topRight = bottomLeft + new Vector3(w, h, 0f);
+        Vector3 bottomRight = bottomLeft + new Vector3(w, 0f, 0f);
 
-        var sb = new StringBuilder();
-
-        // Meta info (diawali #)
-        float missionDuration =
-            (missionEndTime > simulationStartTime && simulationStartTime > 0f)
-            ? (missionEndTime - simulationStartTime)
-            : (_sampleTimes[_sampleTimes.Count - 1]);
-
-        sb.AppendLine("# Swarm drone mission log / speed & distance");
-        sb.AppendLine("# FoundBy," + _foundByDroneName);
-        sb.AppendLine("# FoundByIsLeader," + _foundByLeader);
-        sb.AppendLine("# TargetRoomIndex," + _targetRoomIndex);
-        sb.AppendLine("# MissionDuration," + missionDuration.ToString("F3") + " s");
-        sb.AppendLine();
-
-        // Header kolom
-        sb.Append("time");
-        for (int i = 0; i < nDrones; i++)
-        {
-            sb.Append($",speed_d{i + 1},dist_d{i + 1}");
-        }
-        sb.AppendLine();
-
-        // Isi data per sample
-        int sampleCount = _sampleTimes.Count;
-        for (int k = 0; k < sampleCount; k++)
-        {
-            sb.Append(_sampleTimes[k].ToString("F4"));
-
-            for (int i = 0; i < nDrones; i++)
-            {
-                float speed = 0f;
-                float dist  = 0f;
-
-                if (i < _speedHistory.Count && k < _speedHistory[i].Count)
-                    speed = _speedHistory[i][k];
-
-                if (i < _distanceHistory.Count && k < _distanceHistory[i].Count)
-                    dist = _distanceHistory[i][k];
-
-                sb.Append(",");
-                sb.Append(speed.ToString("F4"));
-                sb.Append(",");
-                sb.Append(dist.ToString("F4"));
-            }
-
-            sb.AppendLine();
-        }
-
-        File.WriteAllText(path, sb.ToString(), Encoding.UTF8);
-        Debug.Log($"[SimManager] ExportSpeedCsv() saved to: {path}");
+        Gizmos.DrawLine(bottomLeft, topLeft);
+        Gizmos.DrawLine(topLeft, topRight);
+        Gizmos.DrawLine(topRight, bottomRight);
+        Gizmos.DrawLine(bottomRight, bottomLeft);
     }
+#endif
 }
