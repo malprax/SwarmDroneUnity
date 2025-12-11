@@ -354,3 +354,24 @@ Kalau kamu mau, langkah berikutnya saya bisa bantu:
 	•	Tahap 5 – Multi-drone & role (leader/member) 🔄
 	•	Tahap 6 – Statistik & visualisasi untuk disertasi 🔄
 	•	Plus bagian Catatan Konsistensi dan Catatan Revisi supaya setiap perubahan besar kita tulis dulu di sana.
+
+
+
+aduuh kacau kawanku, ganti saja ini metode semuanya. Saya mau begini pada saat awal start drone melihat semua ruangan dan menandai posisi nya di homebase terhadap sumbu x dan y, kemudian  bergerak menuju tengah ruangan dan memetakan yang mana ada pintu menuju keruangan lain, terus memutuskan pintu mana yang akan dimasuki, drone bergerak langsung dari posisi tengah ruangan menuju pintu yang akan dimasukinya, pada saat sampai depan pintu juga drone otomatis menandai koordinat pintu tadi terhadap sumbu x dan y, drone masuk kedalam pintu ruangan tersebut serta berusaha mengambil posisi tengah ruangan dan menscan apakah ada pintu atau tidak, jika drone tidak menemukan pintu, maka drone kembali ke pintu sebelumnya langsung karena sudah ada koordinat yang disimpannya. Dan misalnya dalam satu kali scan ruangan, drone mendapati ada tiga pintu, drone menandai dari jauh dulu memastikan ada tiga pintu yang akan dilalui, dan memasukinya satu persatu bergiliran semuanya dan kembali ke home base
+
+
+Saat StartSimulation(), lakukan:
+
+STEP WAJIB: 1 — Build grid occupancy map
+
+Drone memang belum bergerak, tapi arena static bisa kita raycast secara otomatis.
+
+STEP WAJIB: 2 — Flood fill untuk room clustering
+
+STEP WAJIB: 3 — Deteksi doorway
+
+STEP WAJIB: 4 — Buat graph antar room
+
+STEP WAJIB: 5 — Buat route drone → waypoints pertama
+
+Baru drone boleh StartSearch.
