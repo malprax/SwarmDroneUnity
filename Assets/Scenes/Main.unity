@@ -135,7 +135,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!4 &1096443
 Transform:
   m_ObjectHideFlags: 0
@@ -226,27 +226,12 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 0fc9f80a8088441b798eedbfd34187a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::SimManager
-  visitedCellPrefab: {fileID: 8117524662214972237, guid: aeb8742e1a9434405a1f941a91191715, type: 3}
-  visitColorMin: {r: 0, g: 1, b: 1, a: 1}
-  visitColorMax: {r: 1, g: 0, b: 0, a: 1}
-  isPlaying: 0
-  drones:
-  - {fileID: 1193971009}
-  homeBase: {fileID: 1096443}
-  cellSize: 0.25
-  gridWidth: 80
-  gridHeight: 80
-  gridWorldCenter: {x: 0, y: 0}
-  wallCheckRadius: 0.1
-  wallLayerMask:
+  drone: {fileID: 0}
+  autoStart: 1
+  wallMask:
     serializedVersion: 2
-    m_Bits: 128
-  maxSensorRange: 3
-  debugCellMemoryCount: 0
-  discoveredRoomCount: 0
-  roomSummaries: []
-  doorSummaries: []
-  debugGridSteps: 1
+    m_Bits: 0
+  verboseLog: 1
 --- !u!4 &22667979
 Transform:
   m_ObjectHideFlags: 0
@@ -552,7 +537,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &187925404
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -565,7 +550,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 6ff4ac76dab9f414e940ebf8d4ae603f, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::RoomZone
-  roomId: 2
 --- !u!61 &187925405
 BoxCollider2D:
   m_ObjectHideFlags: 0
@@ -765,7 +749,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &238794052
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -778,7 +762,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 6ff4ac76dab9f414e940ebf8d4ae603f, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::RoomZone
-  roomId: 0
 --- !u!61 &238794053
 BoxCollider2D:
   m_ObjectHideFlags: 0
@@ -1127,7 +1110,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!4 &366995866
 Transform:
   m_ObjectHideFlags: 0
@@ -1573,7 +1556,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &446233912
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1620,7 +1603,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &455015481
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2894,6 +2877,37 @@ Transform:
   m_Children: []
   m_Father: {fileID: 1193971013}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &794967659
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 794967660}
+  m_Layer: 0
+  m_Name: VisitedCellsRoot
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &794967660
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 794967659}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &801200328
 GameObject:
   m_ObjectHideFlags: 0
@@ -3302,7 +3316,6 @@ Transform:
   m_LocalScale: {x: 1.6101412, y: 1.6101412, z: 1.6101412}
   m_ConstrainProportionsScale: 0
   m_Children:
-  - {fileID: 1663345218}
   - {fileID: 238794054}
   - {fileID: 1540199498}
   - {fileID: 187925406}
@@ -3345,7 +3358,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &858976323
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -4221,7 +4234,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!4 &1125556649
 Transform:
   m_ObjectHideFlags: 0
@@ -4383,9 +4396,9 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 1193971013}
-  - component: {fileID: 1193971011}
   - component: {fileID: 1193971010}
-  - component: {fileID: 1193971009}
+  - component: {fileID: 1193971014}
+  - component: {fileID: 1193971015}
   m_Layer: 3
   m_Name: Drone1
   m_TagString: Untagged
@@ -4393,28 +4406,6 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &1193971009
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1193971008}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 7b38d019e779441859f0382000bd09f9, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::Drone
-  droneName: Drone
-  moveSpeed: 2
-  avoidDistance: 0.7
-  wallRepelGain: 2
-  randomSteerGain: 0.25
-  maxTurnSpeedDeg: 180
-  sensorRange: 3
-  obstacleMask:
-    serializedVersion: 2
-    m_Bits: 128
 --- !u!58 &1193971010
 CircleCollider2D:
   m_ObjectHideFlags: 0
@@ -4450,34 +4441,7 @@ CircleCollider2D:
   m_CompositeOperation: 0
   m_CompositeOrder: 0
   m_Offset: {x: 0, y: 0}
-  m_Radius: 3.5
---- !u!50 &1193971011
-Rigidbody2D:
-  serializedVersion: 5
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1193971008}
-  m_BodyType: 0
-  m_Simulated: 1
-  m_UseFullKinematicContacts: 0
-  m_UseAutoMass: 0
-  m_Mass: 1
-  m_LinearDamping: 0
-  m_AngularDamping: 0.05
-  m_GravityScale: 0
-  m_Material: {fileID: 0}
-  m_IncludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_ExcludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_Interpolate: 0
-  m_SleepingMode: 1
-  m_CollisionDetection: 1
-  m_Constraints: 4
+  m_Radius: 3
 --- !u!4 &1193971013
 Transform:
   m_ObjectHideFlags: 0
@@ -4503,6 +4467,67 @@ Transform:
   - {fileID: 506017852}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1193971014
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1193971008}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4cc68a7fa1c21436a966ca4255853cb7, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Drone
+  sensorRange: 1
+  sideSensorRange: 0.5
+  wallMask:
+    serializedVersion: 2
+    m_Bits: 128
+  wallSoftDistance: 0.9
+  wallHardDistance: 0.45
+  avoidStrength: 2
+  randomSteerStrength: 0.15
+  bodyRadius: 3
+  safetyMargin: 0.05
+  sensorForwardOffset: 0.15
+  drawGizmos: 1
+  droneName: Drone1
+  rb: {fileID: 0}
+  bodyCollider: {fileID: 0}
+  simManager: {fileID: 0}
+  homeTransform: {fileID: 0}
+  desiredDirection: {x: 1, y: 0}
+  currentSpeed: 0
+  baseSpeed: 2
+  turnSpeedDeg: 180
+--- !u!50 &1193971015
+Rigidbody2D:
+  serializedVersion: 5
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1193971008}
+  m_BodyType: 0
+  m_Simulated: 1
+  m_UseFullKinematicContacts: 0
+  m_UseAutoMass: 0
+  m_Mass: 1
+  m_LinearDamping: 0
+  m_AngularDamping: 0.05
+  m_GravityScale: 1
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_Interpolate: 0
+  m_SleepingMode: 1
+  m_CollisionDetection: 0
+  m_Constraints: 0
 --- !u!1 &1237249466
 GameObject:
   m_ObjectHideFlags: 0
@@ -4651,7 +4676,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!4 &1254953048
 Transform:
   m_ObjectHideFlags: 0
@@ -5108,7 +5133,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!4 &1448992738
 Transform:
   m_ObjectHideFlags: 0
@@ -5285,7 +5310,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &1540199496
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -5298,7 +5323,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 6ff4ac76dab9f414e940ebf8d4ae603f, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::RoomZone
-  roomId: 3
 --- !u!61 &1540199497
 BoxCollider2D:
   m_ObjectHideFlags: 0
@@ -5795,15 +5819,15 @@ GameObject:
   m_Component:
   - component: {fileID: 1663345218}
   - component: {fileID: 1663345217}
-  - component: {fileID: 1663345216}
   - component: {fileID: 1663345215}
+  - component: {fileID: 1663345219}
   m_Layer: 6
   m_Name: TargetObject
   m_TagString: Target
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &1663345215
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -5817,52 +5841,6 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::SearchTarget
   autoSetTrigger: 1
---- !u!61 &1663345216
-BoxCollider2D:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1663345214}
-  m_Enabled: 1
-  serializedVersion: 3
-  m_Density: 1
-  m_Material: {fileID: 0}
-  m_IncludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_ExcludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_LayerOverridePriority: 0
-  m_ForceSendLayers:
-    serializedVersion: 2
-    m_Bits: 4294967295
-  m_ForceReceiveLayers:
-    serializedVersion: 2
-    m_Bits: 4294967295
-  m_ContactCaptureLayers:
-    serializedVersion: 2
-    m_Bits: 4294967295
-  m_CallbackLayers:
-    serializedVersion: 2
-    m_Bits: 4294967295
-  m_IsTrigger: 1
-  m_UsedByEffector: 0
-  m_CompositeOperation: 0
-  m_CompositeOrder: 0
-  m_Offset: {x: 0, y: 0}
-  m_SpriteTilingProperty:
-    border: {x: 0.049999997, y: 0.049999997, z: 0.049999997, w: 0.049999997}
-    pivot: {x: 0.5, y: 0.5}
-    oldSize: {x: 0.16, y: 0.16}
-    newSize: {x: 0.2, y: 0.2}
-    adaptiveTilingThreshold: 0.5
-    drawMode: 0
-    adaptiveTiling: 0
-  m_AutoTiling: 0
-  m_Size: {x: 1.1, y: 1.1}
-  m_EdgeRadius: 0.5
 --- !u!212 &1663345217
 SpriteRenderer:
   m_ObjectHideFlags: 0
@@ -5930,12 +5908,48 @@ Transform:
   m_GameObject: {fileID: 1663345214}
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: 1.0309656, y: 2.4283583, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_LocalPosition: {x: 1.67, y: 6.79, z: 0}
+  m_LocalScale: {x: 1.6101412, y: 1.6101412, z: 1.6101412}
   m_ConstrainProportionsScale: 0
   m_Children: []
-  m_Father: {fileID: 836645837}
+  m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!58 &1663345219
+CircleCollider2D:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1663345214}
+  m_Enabled: 1
+  serializedVersion: 3
+  m_Density: 1
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_ForceSendLayers:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  m_ForceReceiveLayers:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  m_ContactCaptureLayers:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  m_CallbackLayers:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  m_IsTrigger: 1
+  m_UsedByEffector: 0
+  m_CompositeOperation: 0
+  m_CompositeOrder: 0
+  m_Offset: {x: 0, y: 0}
+  m_Radius: 0.07999999
 --- !u!1 &1683658269
 GameObject:
   m_ObjectHideFlags: 0
@@ -6988,7 +7002,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &2091744179
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -7001,7 +7015,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 6ff4ac76dab9f414e940ebf8d4ae603f, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::RoomZone
-  roomId: 1
 --- !u!61 &2091744180
 BoxCollider2D:
   m_ObjectHideFlags: 0
@@ -7395,6 +7408,8 @@ SceneRoots:
   - {fileID: 1193971013}
   - {fileID: 1062294466}
   - {fileID: 1079685252}
+  - {fileID: 1663345218}
   - {fileID: 836645837}
   - {fileID: 2035294983}
   - {fileID: 925864283}
+  - {fileID: 794967660}

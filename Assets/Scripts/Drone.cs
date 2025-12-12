@@ -1,211 +1,193 @@
 using UnityEngine;
 
-[DisallowMultipleComponent]
-[RequireComponent(typeof(Rigidbody2D))]
+[RequireComponent(typeof(CircleCollider2D))]
 public class Drone : MonoBehaviour
 {
     [Header("Identity")]
-    public string droneName = "Drone";
+    public string droneName = "Drone1";
 
     [Header("Movement")]
-    [Tooltip("Kecepatan linear drone (m/s).")]
-    public float moveSpeed = 2f;
+    public float moveSpeed = 2.0f;
+    public float turnSpeedDeg = 220f;
 
-    [Header("Wall Centering & Random Walk")]
-    [Tooltip("Jarak aman dari dinding. Kalau lebih kecil dari ini, drone akan terdorong menjauh.")]
-    public float avoidDistance = 1.0f;       // coba 1.0–1.2
+    [Header("Wall Avoidance")]
+    public LayerMask wallLayerMask;   // SET: hanya Wall
+    public float sensorRange = 1.4f;
+    public float wallHardDistance = 0.35f;
+    public float wallSoftDistance = 0.85f;
+    public float skin = 0.02f;
 
-    [Tooltip("Gain dorongan menjauh dari dinding.")]
-    public float wallRepelGain = 2.0f;
+    [Header("Exploration")]
+    [Range(0f, 1f)] public float randomSteerStrength = 0.25f;
 
-    [Tooltip("Seberapa kuat komponen random (0 = tanpa random).")]
-    public float randomSteerGain = 0.25f;
+    [Header("Anti-Stuck")]
+    public float stuckTimeThreshold = 1.2f;
+    public float minMoveDelta = 0.003f;
 
-    [Tooltip("Kecepatan perubahan arah maksimum (deg/s).")]
-    public float maxTurnSpeedDeg = 180f;
+    [Header("Debug")]
+    public bool verbose = false;
 
-    [Header("Sensor (Raycast)")]
-    [Tooltip("Jarak maksimum sensor (m). Harus sama / mirip maxSensorRange di SimManager.")]
-    public float sensorRange = 3f;
+    private Vector2 desiredDirection;
+    private Vector2 lastPos;
+    private float stuckTimer;
 
-    [Tooltip("LayerMask untuk tembok / obstacle.")]
-    public LayerMask obstacleMask;  // set ke layer Wall
+    private CircleCollider2D circle;
+    private float bodyRadiusWorld;
 
-    // --- runtime state ---
-    private SimManager sim;
-    private Rigidbody2D rb;
-
-    // nilai jarak hasil sensor
-    private float dFront, dRight, dBack, dLeft;
-
-    // random walk state
-    private float randomAngleVel = 0f;   // kecepatan putar random (deg/s) yang di-filter
-
-    // home state (untuk nanti)
-    private bool returningHome = false;
-    public bool IsAtHome { get; private set; } = false;
-
-    // =========================================================
-    //  UNITY LIFECYCLE
-    // =========================================================
-    void Awake()
+    private void Awake()
     {
-        sim = SimManager.Instance;
-        rb = GetComponent<Rigidbody2D>();
+        circle = GetComponent<CircleCollider2D>();
+
+        // radius WORLD = radius lokal * scale (ambil scale terbesar)
+        float s = Mathf.Max(transform.lossyScale.x, transform.lossyScale.y);
+        bodyRadiusWorld = circle.radius * s;
+
+        desiredDirection = transform.right;
+        lastPos = transform.position;
+
+        Debug.Log($"[Drone:{droneName}] Awake() bodyRadiusWorld={bodyRadiusWorld:F3}");
     }
 
-    void Start()
+    private void Start()
     {
-        transform.up = Vector2.up;
-        StopDrone();
+        Debug.Log($"[Drone:{droneName}] Start()");
     }
 
-    // =========================================================
-    //  API DARI SimManager (kompatibilitas)
-    // =========================================================
-    public void SetWaypoints(Vector2[] newWaypoints)
+    private void Update()
     {
-        // Versi random-centering: tidak memakai waypoints lagi.
+        HandleStuck();
+        ComputeDesiredDirection();
+        ApplyMoveWithCollision();
     }
 
-    public void StartReturnHome()
+    private void ComputeDesiredDirection()
     {
-        returningHome = true;
-        IsAtHome = false;
+        Vector2 origin = transform.position;
+        Vector2 forward = transform.right;
+        Vector2 left = transform.up;
+        Vector2 right = -transform.up;
+
+        float f = CastDistance(origin, forward, sensorRange);
+        float l = CastDistance(origin, left, sensorRange * 0.75f);
+        float r = CastDistance(origin, right, sensorRange * 0.75f);
+
+        Vector2 avoid = Vector2.zero;
+
+        if (f < wallHardDistance)
+        {
+            avoid = (l > r) ? (Vector2)transform.up : -(Vector2)transform.up;
+            avoid += -(Vector2)transform.right * 0.8f;
+        }
+        else if (f < wallSoftDistance)
+        {
+            avoid = (l > r) ? (Vector2)transform.up : -(Vector2)transform.up;
+            avoid *= 0.6f;
+        }
+
+        Vector2 randomSteer = Random.insideUnitCircle * randomSteerStrength;
+
+        Vector2 finalDir = (Vector2)transform.right + avoid + randomSteer;
+        if (finalDir.sqrMagnitude < 0.0001f) finalDir = transform.right;
+
+        desiredDirection = finalDir.normalized;
+
+        if (verbose)
+            Debug.Log($"[Drone:{droneName}] f={f:F2} l={l:F2} r={r:F2} dir={desiredDirection}");
     }
 
-    public void StopDrone()
+    private void ApplyMoveWithCollision()
     {
-        if (rb == null) return;
-        rb.linearVelocity = Vector2.zero;
-        rb.angularVelocity = 0f;
-    }
+        if (desiredDirection.sqrMagnitude < 0.0001f) return;
 
-    // =========================================================
-    //  SENSOR RAYCAST
-    // =========================================================
-    void SampleDistances()
-    {
-        dFront = CastDir(transform.up);
-        dBack  = CastDir(-transform.up);
-        dRight = CastDir(transform.right);
-        dLeft  = CastDir(-transform.right);
-    }
+        // ROTATE
+        float angle = Vector2.SignedAngle(transform.right, desiredDirection);
+        float maxStep = turnSpeedDeg * Time.deltaTime;
+        float step = Mathf.Clamp(angle, -maxStep, maxStep);
+        transform.Rotate(0f, 0f, step);
 
-    float CastDir(Vector2 dir)
-    {
-        RaycastHit2D hit = Physics2D.Raycast(transform.position, dir, sensorRange, obstacleMask);
-        if (hit.collider != null)
-            return hit.distance;
+        // MOVE
+        Vector2 moveDir = transform.right;
+        float dist = moveSpeed * Time.deltaTime;
+
+        Vector2 origin = transform.position;
+        float radius = Mathf.Max(0.04f, bodyRadiusWorld);
+
+        // cek maju
+        RaycastHit2D hit = Physics2D.CircleCast(origin, radius, moveDir, dist + skin, wallLayerMask);
+
+        if (!hit.collider)
+        {
+            transform.position = origin + moveDir * dist;
+            return;
+        }
+
+        // SLIDE di sepanjang tembok
+        Vector2 n = hit.normal;
+        Vector2 tangent = new Vector2(-n.y, n.x);
+        float sign = Mathf.Sign(Vector2.Dot(tangent, moveDir));
+        tangent *= sign;
+
+        RaycastHit2D hit2 = Physics2D.CircleCast(origin, radius, tangent, dist + skin, wallLayerMask);
+
+        if (!hit2.collider)
+        {
+            transform.position = origin + tangent.normalized * dist;
+        }
         else
-            return sensorRange;
+        {
+            ForceEscape("corner-hit");
+        }
     }
 
-    // =========================================================
-    //  PHYSICS UPDATE (SMOOTH RANDOM + WALL CENTERING)
-    // =========================================================
-    void FixedUpdate()
+    private float CastDistance(Vector2 origin, Vector2 dir, float range)
     {
-        // >>> DI SINI SUDAH TIDAK ADA LAGI CEK sim.IsPlaying <<<
+        float probeRadius = Mathf.Max(0.02f, bodyRadiusWorld * 0.2f);
+        RaycastHit2D hit = Physics2D.CircleCast(origin, probeRadius, dir.normalized, range, wallLayerMask);
+        return hit.collider ? hit.distance : range;
+    }
 
-        // Pastikan referensi sim ada (jaga-jaga kalau scene baru)
-        if (sim == null)
-            sim = SimManager.Instance;
+    private void HandleStuck()
+    {
+        float moved = Vector2.Distance(transform.position, lastPos);
 
-        // 1. Baca sensor
-        SampleDistances();
-
-        Vector2 forward = transform.up;
-        Vector2 right   = transform.right;
-        Vector2 left    = -right;
-
-        // 2. Vektor dasar: selalu maju
-        Vector2 steering = forward;
-
-        // 3. Gaya tolak dari dinding samping (supaya cenderung di tengah koridor)
-        float leftInfluence  = Mathf.Clamp01((avoidDistance - dLeft)  / avoidDistance);  // >0 kalau terlalu dekat kiri
-        float rightInfluence = Mathf.Clamp01((avoidDistance - dRight) / avoidDistance); // >0 kalau terlalu dekat kanan
-
-        // dorong menjauh: kalau dekat kiri -> dorong ke kanan (right), dst.
-        steering += (right  * leftInfluence  * wallRepelGain);
-        steering += (left   * rightInfluence * wallRepelGain);
-
-        // 4. Hindari dinding depan (pilih sisi yang lebih lapang)
-        string decisionLabel = "ExploreStep";
-        if (dFront < avoidDistance)
+        if (moved < minMoveDelta)
         {
-            float sideBias = dLeft - dRight; // >0 kiri lebih lapang
-            Vector2 sideDir = (sideBias >= 0f) ? left : right;
-            steering += sideDir * wallRepelGain * 2f;
-            decisionLabel = "AvoidFront";
-        }
-
-        // 5. Tambahkan random kecil supaya gerakan tidak terlalu kaku
-float targetRandomVel = Random.Range(-1f, 1f) * maxTurnSpeedDeg * randomSteerGain;
-randomAngleVel = Mathf.Lerp(randomAngleVel, targetRandomVel, 0.05f);
-
-// hitung arah random (smooth heading noise)
-Vector3 rotated = Quaternion.Euler(0f, 0f, randomAngleVel * Time.fixedDeltaTime) * (Vector3)forward;
-Vector2 randomDir = new Vector2(rotated.x, rotated.y) - forward;
-
-steering += randomDir;
-
-        // 6. Kalau mode pulang, beri bias ke home (optional)
-        if (returningHome && sim != null)
-        {
-            Vector2 toHome = (sim.HomePosition - (Vector2)transform.position).normalized;
-            steering = Vector2.Lerp(steering, steering + toHome, 0.3f);
-            decisionLabel = "ReturnStep";
-        }
-
-        // 7. Hitung arah akhir & batasi kecepatan belok
-        if (steering.sqrMagnitude < 1e-6f)
-            steering = forward;
-
-        steering.Normalize();
-
-        float currentAngle = Mathf.Atan2(forward.y, forward.x) * Mathf.Rad2Deg;
-        float targetAngle  = Mathf.Atan2(steering.y, steering.x) * Mathf.Rad2Deg;
-        float maxTurn = maxTurnSpeedDeg * Time.fixedDeltaTime;
-        float newAngle = Mathf.MoveTowardsAngle(currentAngle, targetAngle, maxTurn);
-        Vector2 finalDir = new Vector2(Mathf.Cos(newAngle * Mathf.Deg2Rad), Mathf.Sin(newAngle * Mathf.Deg2Rad));
-
-        // 8. Terapkan gerak
-        rb.linearVelocity = finalDir.normalized * moveSpeed;
-        rb.MoveRotation(newAngle - 90f); // sprite menghadap ke atas
-
-        // 9. Logging ke grid (kalau SimManager ada)
-        if (sim != null)
-        {
-            sim.ReportGridStep(
-                this,
-                rb.position,
-                dFront,
-                dRight,
-                dBack,
-                dLeft,
-                decisionLabel
-            );
-        }
-
-        // 10. Cek Home (kalau sedang return)
-        if (returningHome && sim != null)
-        {
-            float distHome = Vector2.Distance(rb.position, sim.HomePosition);
-            if (distHome < 0.5f)
+            stuckTimer += Time.deltaTime;
+            if (stuckTimer >= stuckTimeThreshold)
             {
-                IsAtHome = true;
-                returningHome = false;
-                sim.NotifyDroneReachedHome(this);
+                ForceEscape("stuck");
+                stuckTimer = 0f;
             }
         }
+        else
+        {
+            stuckTimer = 0f;
+        }
+
+        lastPos = transform.position;
     }
 
-    // =========================================================
-    //  TRIGGER EVENT
-    // =========================================================
-    void OnTriggerEnter2D(Collider2D other)
+    private void ForceEscape(string reason)
     {
-        // kosong dulu, nanti diisi untuk deteksi target.
+        float angle = Random.Range(110f, 180f);
+        if (Random.value > 0.5f) angle = -angle;
+        transform.Rotate(0f, 0f, angle);
+
+        // dorong kecil biar lepas dari nempel collider
+        transform.position += transform.right * 0.06f;
+
+        if (verbose) Debug.LogWarning($"[Drone:{droneName}] ESCAPE ({reason})");
     }
+
+#if UNITY_EDITOR
+    private void OnDrawGizmos()
+    {
+        Gizmos.color = Color.cyan;
+        Vector3 p = transform.position;
+        Gizmos.DrawLine(p, p + (Vector3)desiredDirection * 0.8f);
+
+        Gizmos.color = Color.red;
+        Gizmos.DrawLine(p, p + transform.right * sensorRange);
+    }
+#endif
 }
