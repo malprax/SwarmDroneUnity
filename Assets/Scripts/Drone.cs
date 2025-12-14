@@ -1,10 +1,10 @@
-using System.Collections.Generic;
 using UnityEngine;
 
 [RequireComponent(typeof(Collider2D))]
+[RequireComponent(typeof(Rigidbody2D))]
 public class Drone : MonoBehaviour
 {
-    public enum DroneStatus { SEARCH, AVOID, CHASE, FOUND, RETURN, STUCK, ARRIVED }
+    public enum DroneStatus { SEARCH, CHASE, FOUND, RETURN, ARRIVED }
 
     [Header("Identity")]
     public string droneName = "Drone1";
@@ -15,837 +15,357 @@ public class Drone : MonoBehaviour
     [Tooltip("6-14 recommended. Bigger = smoother.")]
     public float steeringSmoothing = 10f;
 
-    [Header("Collision Masks")]
-    [Tooltip("Mask untuk wall saja (dipakai untuk LOS target).")]
-    public LayerMask wallLayerMask;
-
-    [Tooltip("Mask obstacle untuk avoidance & collision (REKOMENDASI: Wall + Target layer). Jika 0, fallback ke wallLayerMask.")]
+    [Header("Collision")]
+    [Tooltip("Obstacle mask untuk physics + safety (biasanya Wall).")]
     public LayerMask obstacleLayerMask;
 
-    [Header("Wall Avoidance")]
-    public float sensorRange = 1.6f;
-    public float wallHardDistance = 0.45f;
-    public float wallSoftDistance = 0.95f;
+    [Tooltip("Probe jarak dekat untuk anti-ngunci di pojok saat depan mentok.")]
+    public float cornerAvoidProbe = 0.35f;
+
+    [Tooltip("Skin kecil untuk ray/scan (opsional).")]
     public float skin = 0.02f;
 
-    [Header("Exploration")]
-    [Range(0f, 1f)]
-    public float randomSteerStrength = 0.08f;
+    [Header("Planner / Map")]
+    public DroneNavigator navigator;
+    public GridMap2D map;
 
-    [Header("Anti-Room-Lock (Open Space Bias)")]
-    [Range(0f, 1f)]
-    public float openSpaceBias = 0.9f;
-    public float probeRangeMultiplier = 1.6f;
-
-    [Header("Anti-Stuck")]
-    public float stuckTimeThreshold = 1.2f;
-    public float minMoveDelta = 0.003f;
-
-    [Header("Target Detection (LOS)")]
+    [Header("Detection (LOS)")]
     public Transform target;
+    [Tooltip("Wall mask ONLY (untuk LOS).")]
+    public LayerMask wallLayerMask;
     public float detectRange = 6f;
     public float foundDistance = 0.35f;
 
-    [Header("Return Home (to START position)")]
+    [Header("Home")]
     public Transform homeBase;
+    public float homeArriveDistance = 0.6f;
 
-    [Tooltip("Jarak dianggap sampai (tanpa SNAP).")]
-    public float homeArriveDistance = 0.55f;
-
-    [Tooltip("Radius pendekatan akhir (lebih fokus ke home).")]
-    public float returnFinalApproachRadius = 1.6f;
-
-    [Range(0.05f, 1f)]
-    public float returnMinSpeedFactor = 0.25f;
-
-    [Header("Return Anti-Stuck Boost")]
-    [Range(0f, 1f)]
-    public float returnDoorBias = 0.85f;
-    public float returnSideStep = 0.10f;
-
-    [Header("Return Wall Follow")]
-    public float returnWallFollowSeconds = 0.85f;
-    public float returnWallFollowStrength = 0.95f;
-
-    // ===================== Breadcrumb =====================
-    [Header("Trail Memory (Breadcrumb)")]
-    public bool useTrailMemory = true;
-    public float trailRecordDistance = 0.60f;
-    public int trailMaxPoints = 450;
-    public float trailArriveDistance = 0.55f;
-    [Range(0, 40)]
-    public int trailShortcutLookback = 16;
-    public float trailSafeWallDistance = 0.28f;
-
-    [Header("Return Target Ignore")]
-    [Tooltip("Setelah FOUND, ignore collision dengan target beberapa saat agar tidak nancep saat balik.")]
-    public float ignoreTargetSecondsAfterFound = 0.6f;
+    [Header("Corner Escape")]
+    [Tooltip("Kalau benar-benar mentok, putar 90 derajat untuk lepas sudut.")]
+    public bool enableBlockedAheadEscape = true;
 
     [Header("Debug")]
     public bool verbose = false;
 
-    // internal
+    [Header("Debug Logs")]
+    public bool logState = true;
+    public bool logMotion = true;
+    public bool logMapping = false;
+    public bool logPlanning = true;
+    public float logEverySeconds = 0.25f;
+
+    private Rigidbody2D rb;
     private Collider2D col;
-    private float bodyRadius;
-
-    private Vector2 desiredDirection;
-    private Vector2 smoothedDirection;
-
-    private Vector2 lastPos;
-    private float stuckTimer;
+    private float colRadius = 0.12f; // fallback kalau bukan circle
+    private CircleCollider2D circleCol;
 
     private DroneStatus status = DroneStatus.SEARCH;
     private bool hasFoundTarget = false;
-    private bool isReturning = false;
     private bool isStopped = false;
 
-    // start/home
+    private Vector2 smoothedDir;
     private Vector2 startHomePos;
-    private float startHomeRotZ;
-    private bool hasCapturedStartHome = false;
 
-    private bool arrivedLogged = false;
-    private float currentReturnDist = 999f;
+    private float fixedTurnVelDeg = 0f;
 
-    // RETURN
-    private Vector2 currentReturnDir = Vector2.right;
-
-    // sensor cache
-    private float lastFrontHitDist = 999f;
-    private float lastLeftHitDist = 999f;
-    private float lastRightHitDist = 999f;
-    private int returnStuckCount = 0;
-
-    // wall-follow
-    private float returnWallFollowTimer = 0f;
-    private int returnFollowSign = 1;
-
-    // ignore target collision timer
-    private float ignoreTargetTimer = 0f;
-    private Collider2D targetColCached;
-
-    // cache mask
-    private LayerMask ObstacleMask => (obstacleLayerMask.value != 0) ? obstacleLayerMask : wallLayerMask;
-
-    // filters
-    private ContactFilter2D obstacleFilter;
-    private ContactFilter2D wallFilter;
-
-    // non-alloc buffers
-    private readonly RaycastHit2D[] hitBuf = new RaycastHit2D[1];
-    private readonly Collider2D[] overlapCols = new Collider2D[32];
-
-    // trail
-    private readonly List<Vector2> trail = new List<Vector2>(512);
-    private Vector2 lastTrailPos;
-
-    // ===================== Public API =====================
-    public void SetTarget(Transform t) => target = t;
-    public void SetHome(Transform h) => homeBase = h;
-
-    public void CaptureStartHomeNow()
-    {
-        startHomePos = transform.position;
-        startHomeRotZ = transform.eulerAngles.z;
-        hasCapturedStartHome = true;
-
-        if (verbose)
-            Debug.Log($"[Drone:{droneName}] CaptureStartHomeNow pos={startHomePos} rotZ={startHomeRotZ:F1}");
-    }
-
-    public void ResetMission()
-    {
-        hasFoundTarget = false;
-        isReturning = false;
-        isStopped = false;
-        arrivedLogged = false;
-        stuckTimer = 0f;
-
-        desiredDirection = transform.right;
-        smoothedDirection = desiredDirection;
-
-        returnWallFollowTimer = 0f;
-        returnStuckCount = 0;
-
-        ignoreTargetTimer = 0f;
-        ApplyIgnoreTargetCollision(false);
-
-        trail.Clear();
-        trail.Add(startHomePos);
-        lastTrailPos = startHomePos;
-
-        SetStatus(DroneStatus.SEARCH);
-    }
-
-    public void StopMission()
-    {
-        isStopped = true;
-        SetStatus(DroneStatus.STUCK);
-    }
+    // log throttle (fixed)
+    private float nextLogTime = 0f;
+    private Vector2Int lastCell = new Vector2Int(int.MinValue, int.MinValue);
 
     private void Awake()
     {
+        rb = GetComponent<Rigidbody2D>();
         col = GetComponent<Collider2D>();
-        bodyRadius = EstimateBodyRadius(col) + skin;
+        circleCol = GetComponent<CircleCollider2D>();
 
-        desiredDirection = transform.right;
-        smoothedDirection = desiredDirection;
-
-        lastPos = transform.position;
-
-        obstacleFilter = new ContactFilter2D();
-        obstacleFilter.SetLayerMask(ObstacleMask);
-        obstacleFilter.useTriggers = false;
-
-        wallFilter = new ContactFilter2D();
-        wallFilter.SetLayerMask(wallLayerMask);
-        wallFilter.useTriggers = false;
-
-        // fallback: kalau SimManager belum sempat capture
-        if (!hasCapturedStartHome)
+        // ambil radius collider (untuk CircleCast blocked-ahead)
+        if (circleCol != null)
         {
-            startHomePos = transform.position;
-            startHomeRotZ = transform.eulerAngles.z;
-            hasCapturedStartHome = true;
+            float scale = Mathf.Max(transform.lossyScale.x, transform.lossyScale.y);
+            colRadius = Mathf.Max(0.01f, circleCol.radius * scale);
+        }
+        else
+        {
+            colRadius = Mathf.Max(0.05f, Mathf.Max(col.bounds.extents.x, col.bounds.extents.y));
         }
 
-        // depenetrate valid 2D
-        ResolveOverlapsDistance(12);
+        // Physics-safe defaults (guard)
+        rb.gravityScale = 0f;
+        rb.interpolation = RigidbodyInterpolation2D.Interpolate;
+        rb.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
+        rb.constraints = RigidbodyConstraints2D.FreezeRotation;
 
-        trail.Clear();
-        trail.Add(startHomePos);
-        lastTrailPos = startHomePos;
+        // HOME konsisten
+        startHomePos = (homeBase != null) ? (Vector2)homeBase.position : rb.position;
+
+        smoothedDir = transform.right;
+
+        // inject ke navigator juga (kalau ada)
+        if (navigator != null)
+        {
+            navigator.map = map;
+            navigator.wallLayerMask = wallLayerMask;
+            navigator.obstacleLayerMask = obstacleLayerMask;
+        }
+
+        if (verbose)
+            Debug.Log($"[Drone:{droneName}] Awake startHomePos={Fmt2(startHomePos)} homeArriveDistance={homeArriveDistance:F2} colRadius={colRadius:F2}");
     }
 
     private void Update()
     {
         if (isStopped) return;
 
-        if (returnWallFollowTimer > 0f)
-            returnWallFollowTimer -= Time.deltaTime;
-
-        // manage ignore-target timer
-        if (ignoreTargetTimer > 0f)
+        // 1) map update
+        if (navigator != null)
         {
-            ignoreTargetTimer -= Time.deltaTime;
-            if (ignoreTargetTimer <= 0f)
-                ApplyIgnoreTargetCollision(false);
+            navigator.TickMap(rb.position);
+
+            if (logMapping && CanLog())
+            {
+                if (map != null && map.WorldToCell(rb.position, out var cc))
+                    Debug.Log($"[Drone:{droneName}] MAP tick at cell={cc} world={Fmt2(rb.position)}");
+            }
         }
 
-        // ✅ selalu pastikan tidak overlap
-        ResolveOverlapsDistance(isReturning ? 2 : 1);
+        // 2) decide direction
+        Vector2 desired = DecideDesiredDirection();
 
-        // 1) intention
-        Vector2 intentionDir = DecideIntentionDirection();
+        // 3) corner avoid blend (anti pojok)
+        desired = ApplyCornerAvoid(desired);
 
-        // 2) avoidance + smoothing
-        desiredDirection = ComputeAvoidedDirection(intentionDir);
-
+        // 4) smooth direction (frame-rate independent)
         float t = 1f - Mathf.Exp(-steeringSmoothing * Time.deltaTime);
-        smoothedDirection = Vector2.Lerp(smoothedDirection, desiredDirection, t);
-        if (smoothedDirection.sqrMagnitude < 0.0001f) smoothedDirection = desiredDirection;
-        smoothedDirection.Normalize();
+        smoothedDir = Vector2.Lerp(smoothedDir, desired, t);
 
-        // 3) rotate
-        RotateTowards(smoothedDirection);
+        if (smoothedDir.sqrMagnitude < 0.0001f) smoothedDir = desired;
+        if (smoothedDir.sqrMagnitude < 0.0001f) return;
 
-        // speed factor saat RETURN (jangan ngebut kalau dekat dinding)
-        float speedFactor = 1f;
-        if (status == DroneStatus.RETURN)
-        {
-            float k = Mathf.InverseLerp(homeArriveDistance, returnFinalApproachRadius, currentReturnDist);
-            k = Mathf.Clamp01(k);
-            speedFactor = Mathf.Lerp(returnMinSpeedFactor, 1f, k);
+        smoothedDir.Normalize();
 
-            if (returnWallFollowTimer > 0f || lastFrontHitDist < wallSoftDistance * 0.9f)
-                speedFactor = Mathf.Min(speedFactor, 0.70f);
-        }
+        // 5) advance waypoint (before move)
+        if (navigator != null) navigator.AdvanceWaypointIfArrived(rb.position);
 
-        // 4) move
-        Vector2 delta = (Vector2)transform.right * (moveSpeed * speedFactor * Time.deltaTime);
-        bool moved = MoveWithCollision(delta);
+        // 6) compute rotation velocity for FixedUpdate
+        float angle = Vector2.SignedAngle(transform.right, smoothedDir);
+        float maxStep = turnSpeedDeg * Time.deltaTime;
+        float step = Mathf.Clamp(angle, -maxStep, maxStep);
+        fixedTurnVelDeg = step / Mathf.Max(0.0001f, Time.deltaTime);
 
-        // 4.5) record trail
-        RecordTrailIfNeeded();
+        // LOG snapshot
+        if (CanLog())
+            LogStateSnapshot("UPDATE", desired, smoothedDir);
+    }
 
-        // 5) stuck handler (untuk bantu recovery halus)
-        HandleStuck(moved);
+    private void FixedUpdate()
+{
+    if (isStopped) return;
+
+    // rotate using rb (lebih stabil)
+    float rotStep = fixedTurnVelDeg * Time.fixedDeltaTime;
+    rb.MoveRotation(rb.rotation + rotStep);
+
+    // Escape kalau bener-bener mentok depan (corner lock)
+    if (enableBlockedAheadEscape && IsBlockedAhead())
+    {
+        float turn = (Random.value > 0.5f) ? 90f : -90f;
+        rb.MoveRotation(rb.rotation + turn);
+
+        if (logMotion && CanLog())
+            Debug.Log($"[Drone:{droneName}] ESCAPE blockedAhead -> rotate {turn:+0;-0} deg");
     }
 
     // =========================================================
-    // MODE DECISION
+    // move forward physics-safe (ANTI "MASUK TEMBOK")
     // =========================================================
-    private Vector2 DecideIntentionDirection()
+    Vector2 forward = transform.right;
+
+    // jarak langkah yang ingin ditempuh frame ini
+    float stepDist = moveSpeed * Time.fixedDeltaTime;
+
+    // sweep check: apakah langkah ini akan nabrak tembok?
+    RaycastHit2D hit = Physics2D.CircleCast(
+        rb.position,
+        colRadius,
+        forward,
+        stepDist + skin,           // +skin biar tidak nempel banget
+        obstacleLayerMask
+    );
+
+    if (hit.collider == null)
+    {
+        Vector2 newPos = rb.position + forward * stepDist;
+        rb.MovePosition(newPos);
+    }
+    else
+    {
+        // kalau kena, maju hanya sampai sebelum tembok (pakai jarak hit - skin)
+        float safeDist = Mathf.Max(0f, hit.distance - skin);
+        Vector2 newPos = rb.position + forward * safeDist;
+        rb.MovePosition(newPos);
+
+        if (logMotion && CanLog())
+            Debug.Log($"[Drone:{droneName}] BLOCKED by={hit.collider.name} hitDist={hit.distance:F3} safeDist={safeDist:F3}");
+    }
+
+    if (navigator != null) navigator.AdvanceWaypointIfArrived(rb.position);
+
+    if (logMotion && CanLog())
+    {
+        Debug.Log($"[Drone:{droneName}] MOVE pos={Fmt2(rb.position)} step={stepDist:F3} fwd={Fmt2(forward)}");
+    }
+}
+
+    // =========================
+    // DECISION
+    // =========================
+    private Vector2 DecideDesiredDirection()
     {
         // RETURN
-        if (isReturning)
+        if (status == DroneStatus.RETURN)
         {
-            SetStatus(DroneStatus.RETURN);
+            float distHome = Vector2.Distance(rb.position, startHomePos);
 
-            currentReturnDist = Vector2.Distance(transform.position, startHomePos);
-
-            Vector2 goal = useTrailMemory ? GetReturnGoalFromTrail() : startHomePos;
-            Vector2 toGoal = goal - (Vector2)transform.position;
-            currentReturnDir = (toGoal.sqrMagnitude > 0.0001f) ? toGoal.normalized : (Vector2)transform.right;
-
-            if (currentReturnDist <= homeArriveDistance)
+            if (distHome <= homeArriveDistance)
             {
-                isReturning = false;
-                isStopped = true;
                 SetStatus(DroneStatus.ARRIVED);
+                isStopped = true;
 
-                if (!arrivedLogged)
-                {
-                    arrivedLogged = true;
-                    Debug.Log($"[Drone:{droneName}] ARRIVED HOME (no snap) at {transform.position} dist={currentReturnDist:F2}");
-                }
-                return transform.right;
+                Debug.Log($"[Drone:{droneName}] ARRIVED HOME at {Fmt2(rb.position)} dist={distHome:F2} <= {homeArriveDistance:F2}");
+                return (Vector2)transform.right;
             }
 
-            return currentReturnDir;
-        }
-
-        // TARGET logic
-        if (target != null)
-        {
-            bool visible = HasLineOfSightToTarget(out float dist);
-
-            if (visible)
+            if (navigator != null)
             {
-                if (!hasFoundTarget && dist <= foundDistance)
+                bool needPlan = !navigator.HasPath || navigator.ShouldReplan();
+                if (needPlan && map != null && map.WorldToCell(startHomePos, out var homeCell))
                 {
-                    hasFoundTarget = true;
-                    SetStatus(DroneStatus.FOUND);
-                    Debug.Log($"[Drone:{droneName}] FOUND target at {target.position} dist={dist:F2}");
+                    navigator.ReplanToCell(homeCell, rb.position);
 
-                    // ✅ kunci: jangan nancep saat transisi -> ignore collision target sebentar
-                    BeginIgnoreTargetAfterFound();
-
-                    // ✅ paksa keluar sedikit dari area target + depenetrate
-                    Vector2 away = ((Vector2)transform.position - (Vector2)target.position);
-                    if (away.sqrMagnitude > 0.0001f) TryNudge(away.normalized * 0.22f);
-                    ResolveOverlapsDistance(10);
-
-                    // RETURN
-                    isReturning = true;
-                    SetStatus(DroneStatus.RETURN);
-
-                    if (useTrailMemory) ForceAddTrailPoint(transform.position);
-
-                    return transform.right;
+                    if (logPlanning && CanLog())
+                        Debug.Log($"[Drone:{droneName}] PLAN Home -> cell={homeCell} hasPath={navigator.HasPath} len={navigator.DebugPathLen}");
                 }
 
-                SetStatus(DroneStatus.CHASE);
-                Vector2 toT = (Vector2)target.position - (Vector2)transform.position;
-                return (toT.sqrMagnitude > 0.0001f) ? toT.normalized : (Vector2)transform.right;
+                if (navigator.HasPath)
+                {
+                    Vector2 wp = navigator.GetCurrentWaypointWorld();
+                    Vector2 toWp = wp - rb.position;
+                    if (toWp.sqrMagnitude > 0.0001f) return toWp.normalized;
+                }
+            }
+
+            // fallback direct
+            Vector2 direct = startHomePos - rb.position;
+            return (direct.sqrMagnitude > 0.0001f) ? direct.normalized : (Vector2)transform.right;
+        }
+
+        // TARGET
+        if (target != null && HasLOS((Vector2)target.position, out float dist))
+        {
+            if (!hasFoundTarget && dist <= foundDistance)
+            {
+                hasFoundTarget = true;
+
+                SetStatus(DroneStatus.FOUND);
+                Debug.Log($"[Drone:{droneName}] FOUND target at {Fmt2(target.position)} dist={dist:F2}");
+
+                SetStatus(DroneStatus.RETURN);
+
+                if (navigator != null && map != null && map.WorldToCell(startHomePos, out var homeCell))
+                    navigator.ReplanToCell(homeCell, rb.position);
+
+                return (Vector2)transform.right; // 1 frame stabilizer
+            }
+
+            SetStatus(DroneStatus.CHASE);
+            Vector2 toT = (Vector2)target.position - rb.position;
+            return (toT.sqrMagnitude > 0.0001f) ? toT.normalized : (Vector2)transform.right;
+        }
+
+        // SEARCH (frontier)
+        SetStatus(DroneStatus.SEARCH);
+
+        if (navigator != null)
+        {
+            bool needPlan = !navigator.HasPath || navigator.ShouldReplan();
+            if (needPlan) navigator.ReplanToFrontier(rb.position);
+
+            if (navigator.HasPath)
+            {
+                Vector2 wp = navigator.GetCurrentWaypointWorld();
+                Vector2 toWp = wp - rb.position;
+                if (toWp.sqrMagnitude > 0.0001f) return toWp.normalized;
             }
         }
 
-        if (status != DroneStatus.AVOID && status != DroneStatus.STUCK)
-            SetStatus(DroneStatus.SEARCH);
-
-        return transform.right;
+        return (Vector2)transform.right;
     }
 
-    private bool HasLineOfSightToTarget(out float dist)
+    // =========================
+    // LOS
+    // =========================
+    private bool HasLOS(Vector2 targetPos, out float dist)
     {
-        dist = 999f;
-        if (target == null) return false;
-
-        Vector2 origin = transform.position;
-        Vector2 toT = (Vector2)target.position - origin;
-        dist = toT.magnitude;
-
+        dist = Vector2.Distance(rb.position, targetPos);
         if (dist > detectRange) return false;
 
-        int n = Physics2D.Raycast(origin, toT.normalized, wallFilter, hitBuf, dist);
-        return n == 0;
+        Vector2 origin = rb.position;
+        Vector2 dir = (targetPos - origin).normalized;
+
+        RaycastHit2D hit = Physics2D.Raycast(origin, dir, dist, wallLayerMask);
+        return hit.collider == null;
     }
 
-    // =========================================================
-    // BREADCRUMB
-    // =========================================================
-    private void RecordTrailIfNeeded()
+    // =========================
+    // CORNER AVOID
+    // =========================
+    private Vector2 ApplyCornerAvoid(Vector2 desired)
     {
-        if (!useTrailMemory) return;
-        if (isReturning || status == DroneStatus.RETURN || status == DroneStatus.ARRIVED) return;
+        if (cornerAvoidProbe <= 0.01f) return desired;
 
-        Vector2 p = transform.position;
+        Vector2 origin = rb.position;
+        Vector2 fwd = transform.right;
 
-        // hanya rekam di area aman (tidak terlalu dekat dinding)
-        float f = CastDistance(p, transform.right, trailSafeWallDistance);
-        float u = CastDistance(p, transform.up, trailSafeWallDistance);
-        float d = CastDistance(p, -transform.up, trailSafeWallDistance);
+        // depan mentok?
+        RaycastHit2D hitF = Physics2D.CircleCast(origin, colRadius, fwd, cornerAvoidProbe, obstacleLayerMask);
+        if (hitF.collider == null) return desired;
 
-        if (f < trailSafeWallDistance || u < trailSafeWallDistance || d < trailSafeWallDistance)
-            return;
-
-        if (Vector2.Distance(p, lastTrailPos) >= trailRecordDistance)
-        {
-            trail.Add(p);
-            lastTrailPos = p;
-
-            if (trail.Count > trailMaxPoints)
-                trail.RemoveAt(1); // jangan buang index 0 (home)
-        }
-    }
-
-    private void ForceAddTrailPoint(Vector2 p)
-    {
-        if (!useTrailMemory) return;
-
-        if (trail.Count == 0)
-        {
-            trail.Add(startHomePos);
-            lastTrailPos = startHomePos;
-        }
-
-        if (Vector2.Distance(p, trail[trail.Count - 1]) >= 0.15f)
-        {
-            trail.Add(p);
-            lastTrailPos = p;
-        }
-    }
-
-    private Vector2 GetReturnGoalFromTrail()
-    {
-        if (!useTrailMemory || trail.Count == 0) return startHomePos;
-
-        Vector2 curr = transform.position;
-        int last = trail.Count - 1;
-
-        // pop kalau sudah dekat waypoint terakhir
-        if (last > 0 && Vector2.Distance(curr, trail[last]) <= trailArriveDistance)
-        {
-            trail.RemoveAt(last);
-            last = trail.Count - 1;
-        }
-        if (last <= 0) return startHomePos;
-
-        // pilih waypoint yang bisa dilihat tanpa halangan, dengan lookback
-        int bestIndex = last;
-        int minIndex = Mathf.Max(0, last - trailShortcutLookback);
-
-        for (int i = last; i >= minIndex; i--)
-        {
-            Vector2 wp = trail[i];
-            Vector2 diff = wp - curr;
-            float dist = diff.magnitude;
-            if (dist < 0.001f) { bestIndex = i; continue; }
-
-            hitBuf[0] = default;
-            int n = Physics2D.CircleCast(curr, bodyRadius, diff.normalized, obstacleFilter, hitBuf, dist);
-
-            if (n == 0 || hitBuf[0].collider == null)
-            {
-                // waypoint reachable, cek juga aman (tidak di bibir dinding)
-                if (IsWaypointSafe(wp))
-                {
-                    bestIndex = i;
-                    break;
-                }
-            }
-        }
-
-        return trail[bestIndex];
-    }
-
-    private bool IsWaypointSafe(Vector2 wp)
-    {
-        float f = CastDistance(wp, transform.right, trailSafeWallDistance);
-        float u = CastDistance(wp, transform.up, trailSafeWallDistance);
-        float d = CastDistance(wp, -transform.up, trailSafeWallDistance);
-        return (f >= trailSafeWallDistance && u >= trailSafeWallDistance && d >= trailSafeWallDistance);
-    }
-
-    // =========================================================
-    // AVOIDANCE + RETURN WALL-FOLLOW
-    // =========================================================
-    private Vector2 ComputeAvoidedDirection(Vector2 intentionDir)
-    {
-        Vector2 origin = transform.position;
-        Vector2 forward = transform.right;
         Vector2 left = transform.up;
         Vector2 right = -transform.up;
 
-        float f = CastDistance(origin, forward, sensorRange);
-        float l = CastDistance(origin, left, sensorRange * 0.9f);
-        float r = CastDistance(origin, right, sensorRange * 0.9f);
+        float dl = Physics2D.Raycast(origin, left, cornerAvoidProbe, obstacleLayerMask).collider ? 0f : 1f;
+        float dr = Physics2D.Raycast(origin, right, cornerAvoidProbe, obstacleLayerMask).collider ? 0f : 1f;
 
-        lastFrontHitDist = f;
-        lastLeftHitDist = l;
-        lastRightHitDist = r;
+        Vector2 side = (dl >= dr) ? left : right;
+        Vector2 blended = (desired * 0.55f + side * 0.85f).normalized;
 
-        // RETURN: kalau depan buntu -> aktifkan wall follow
-        if (status == DroneStatus.RETURN)
+        if (logMotion && CanLog())
         {
-            bool frontBlockedHard = (f < wallHardDistance * 1.05f);
-            if (frontBlockedHard)
-            {
-                float scoreL = l + Vector2.Dot(left, currentReturnDir) * (0.35f + 0.35f * returnDoorBias);
-                float scoreR = r + Vector2.Dot(right, currentReturnDir) * (0.35f + 0.35f * returnDoorBias);
-                returnFollowSign = (scoreL >= scoreR) ? 1 : -1;
-                returnWallFollowTimer = returnWallFollowSeconds;
-            }
+            Debug.Log($"[Drone:{droneName}] CORNER_AVOID frontBlocked by={hitF.collider.name} hitDist={hitF.distance:F2} choose={(dl >= dr ? "LEFT" : "RIGHT")}");
         }
 
-        float avoidStrength = 0f;
-        if (f < wallHardDistance) avoidStrength = 1f;
-        else if (f < wallSoftDistance) avoidStrength = Mathf.InverseLerp(wallSoftDistance, wallHardDistance, f);
-
-        Vector2 avoid = Vector2.zero;
-        if (avoidStrength > 0f)
-        {
-            float turnSign = (l > r) ? 1f : -1f;
-            Vector2 side = (turnSign > 0) ? (Vector2)transform.up : -(Vector2)transform.up;
-            avoid = (side * 1.0f + (-forward) * 0.35f).normalized;
-
-            if (status != DroneStatus.RETURN)
-                SetStatus(DroneStatus.AVOID);
-        }
-
-        Vector2 openDir = GetBestOpenDirection(origin, probeRangeMultiplier * sensorRange);
-
-        float randomFactor = (status == DroneStatus.SEARCH) ? 1f : 0.20f;
-        Vector2 random = Random.insideUnitCircle.normalized * (randomSteerStrength * randomFactor);
-
-        Vector2 baseDir = (intentionDir.sqrMagnitude > 0.0001f) ? intentionDir : forward;
-
-        Vector2 follow = Vector2.zero;
-        if (status == DroneStatus.RETURN && returnWallFollowTimer > 0f)
-        {
-            Vector2 side = (returnFollowSign > 0) ? (Vector2)transform.up : -(Vector2)transform.up;
-            follow = (forward * 0.75f + side * 0.85f).normalized * returnWallFollowStrength;
-        }
-
-        float openWeight = (0.90f * openSpaceBias);
-        float randomWeight = 0.60f;
-        float baseWeight = 1.10f;
-        float followWeight = 0f;
-
-        if (status == DroneStatus.RETURN)
-        {
-            float k = Mathf.InverseLerp(homeArriveDistance, returnFinalApproachRadius, currentReturnDist);
-            k = Mathf.Clamp01(k);
-
-            bool frontBlocked = lastFrontHitDist < wallSoftDistance * 0.85f;
-
-            // ✅ RETURN: prioritas keluar dari dinding dulu
-            baseWeight = frontBlocked ? Mathf.Lerp(0.95f, 1.10f, k) : Mathf.Lerp(1.55f, 1.30f, k);
-            openWeight = frontBlocked ? Mathf.Lerp(0.75f, 1.05f, k) : Mathf.Lerp(0.15f, 0.45f, k);
-            randomWeight = frontBlocked ? 0.03f : Mathf.Lerp(0.02f, 0.06f, k);
-
-            followWeight = (returnWallFollowTimer > 0f) ? 1.40f : 0f;
-        }
-
-        Vector2 finalDir =
-            baseDir * baseWeight +
-            avoid * 2.15f +
-            openDir * openWeight +
-            random * randomWeight +
-            follow * followWeight;
-
-        if (finalDir.sqrMagnitude < 0.0001f) finalDir = forward;
-        return finalDir.normalized;
+        return blended;
     }
 
-    private Vector2 GetBestOpenDirection(Vector2 origin, float probeDist)
+    private bool IsBlockedAhead()
     {
-        Vector2[] dirs =
-        {
-            (Vector2)transform.right,
-            ((Vector2)transform.right + (Vector2)transform.up).normalized,
-            (Vector2)transform.up,
-            (-(Vector2)transform.right + (Vector2)transform.up).normalized,
-            -(Vector2)transform.right,
-            (-(Vector2)transform.right - (Vector2)transform.up).normalized,
-            -(Vector2)transform.up,
-            ((Vector2)transform.right - (Vector2)transform.up).normalized
-        };
+        Vector2 pos = rb.position;
+        Vector2 dir = transform.right;
 
-        float bestScore = -999f;
-        Vector2 bestDir = transform.right;
+        RaycastHit2D hit = Physics2D.CircleCast(
+            pos,
+            colRadius,
+            dir,
+            cornerAvoidProbe + skin,
+            obstacleLayerMask
+        );
 
-        for (int i = 0; i < dirs.Length; i++)
-        {
-            float d = CastDistance(origin, dirs[i], probeDist);
-            float score = d;
-
-            // sedikit prefer arah maju
-            score += Vector2.Dot(dirs[i], (Vector2)transform.right) * 0.10f;
-
-            // bias pulang saat RETURN
-            if (status == DroneStatus.RETURN)
-                score += Vector2.Dot(dirs[i], currentReturnDir) * (0.45f + 0.35f * returnDoorBias);
-
-            if (score > bestScore)
-            {
-                bestScore = score;
-                bestDir = dirs[i];
-            }
-        }
-
-        return bestDir.normalized;
+        return hit.collider != null;
     }
 
-    private float CastDistance(Vector2 origin, Vector2 dir, float dist)
-    {
-        hitBuf[0] = default;
-        int n = Physics2D.CircleCast(origin, bodyRadius, dir, obstacleFilter, hitBuf, dist);
-        if (n > 0 && hitBuf[0].collider != null)
-            return Mathf.Max(0f, hitBuf[0].distance);
-
-        return dist;
-    }
-
-    // =========================================================
-    // MOVEMENT
-    // =========================================================
-    private void RotateTowards(Vector2 dir)
-    {
-        if (dir.sqrMagnitude < 0.0001f) return;
-
-        float angle = Vector2.SignedAngle(transform.right, dir);
-        float maxStep = turnSpeedDeg * Time.deltaTime;
-        float step = Mathf.Clamp(angle, -maxStep, maxStep);
-        transform.Rotate(0f, 0f, step);
-    }
-
-    private bool MoveWithCollision(Vector2 delta)
-    {
-        if (delta.sqrMagnitude < 0.0000001f) return false;
-
-        // keluar overlap dulu
-        ResolveOverlapsDistance(2);
-
-        Vector2 origin = transform.position;
-        Vector2 dir = delta.normalized;
-        float dist = delta.magnitude;
-
-        hitBuf[0] = default;
-        int n = Physics2D.CircleCast(origin, bodyRadius, dir, obstacleFilter, hitBuf, dist);
-
-        if (n == 0 || hitBuf[0].collider == null)
-        {
-            transform.position = (Vector2)transform.position + delta;
-            return true;
-        }
-
-        RaycastHit2D hit = hitBuf[0];
-
-        float safeMove = Mathf.Max(0f, hit.distance - (skin + 0.001f));
-        if (safeMove > 0f)
-            transform.position = (Vector2)transform.position + dir * safeMove;
-
-        // slide
-        Vector2 normal = hit.normal;
-        Vector2 slideA = Vector2.Perpendicular(normal).normalized;
-        if (Vector2.Dot(slideA, dir) < 0f) slideA = -slideA;
-        Vector2 slideB = -slideA;
-
-        float remaining = dist - safeMove;
-        if (remaining > 0.0001f)
-        {
-            // A
-            hitBuf[0] = default;
-            int nA = Physics2D.CircleCast((Vector2)transform.position, bodyRadius, slideA, obstacleFilter, hitBuf, remaining);
-            float moveA = (nA == 0 || hitBuf[0].collider == null) ? remaining : Mathf.Max(0f, hitBuf[0].distance - (skin + 0.001f));
-            if (moveA > 0.0001f)
-            {
-                transform.position = (Vector2)transform.position + slideA * moveA;
-                return true;
-            }
-
-            // B
-            hitBuf[0] = default;
-            int nB = Physics2D.CircleCast((Vector2)transform.position, bodyRadius, slideB, obstacleFilter, hitBuf, remaining);
-            float moveB = (nB == 0 || hitBuf[0].collider == null) ? remaining : Mathf.Max(0f, hitBuf[0].distance - (skin + 0.001f));
-            if (moveB > 0.0001f)
-            {
-                transform.position = (Vector2)transform.position + slideB * moveB;
-                return true;
-            }
-        }
-
-        // micro reverse saat RETURN
-        if (status == DroneStatus.RETURN)
-        {
-            Vector2 back = -dir;
-            float backDist = Mathf.Min(0.14f, dist);
-
-            hitBuf[0] = default;
-            int nb = Physics2D.CircleCast((Vector2)transform.position, bodyRadius, back, obstacleFilter, hitBuf, backDist);
-            float backMove = (nb == 0 || hitBuf[0].collider == null) ? backDist : Mathf.Max(0f, hitBuf[0].distance - (skin + 0.001f));
-            if (backMove > 0.0001f)
-            {
-                transform.position = (Vector2)transform.position + back * backMove;
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    // =========================================================
-    // DEPENETRATE 2D (VALID) – pakai ColliderDistance2D
-    // =========================================================
-    private void ResolveOverlapsDistance(int iterations)
-    {
-        for (int it = 0; it < iterations; it++)
-        {
-            int count = col.Overlap(obstacleFilter, overlapCols);
-            if (count <= 0) return;
-
-            bool pushedAny = false;
-
-            for (int i = 0; i < count; i++)
-            {
-                Collider2D other = overlapCols[i];
-                if (other == null) continue;
-                if (other == col) continue;
-
-                // kalau target sedang di-ignore, skip dorong terhadap target (biar tidak tarik-menarik)
-                if (ignoreTargetTimer > 0f && targetColCached != null && other == targetColCached)
-                    continue;
-
-                ColliderDistance2D cd = col.Distance(other);
-                if (!cd.isOverlapped) continue;
-
-                // cd.distance negatif kalau overlap
-                float pushDist = (-cd.distance) + (skin + 0.003f);
-                Vector2 push = cd.normal * pushDist;
-
-                // clamp biar tidak teleport
-                float maxPush = 0.35f;
-                if (push.magnitude > maxPush) push = push.normalized * maxPush;
-
-                transform.position = (Vector2)transform.position + push;
-                pushedAny = true;
-            }
-
-            if (!pushedAny) return;
-        }
-    }
-
-    // =========================================================
-    // STUCK handler (dipakai sebagai recovery halus)
-    // =========================================================
-    private void HandleStuck(bool movedThisFrame)
-    {
-        float movedDist = Vector2.Distance(transform.position, lastPos);
-
-        float adaptiveMin = minMoveDelta;
-        if (status == DroneStatus.RETURN)
-        {
-            float k = Mathf.InverseLerp(homeArriveDistance, returnFinalApproachRadius, currentReturnDist);
-            k = Mathf.Clamp01(k);
-            adaptiveMin = Mathf.Lerp(minMoveDelta * 0.18f, minMoveDelta * 0.55f, k);
-        }
-
-        if (!movedThisFrame || movedDist < adaptiveMin)
-        {
-            stuckTimer += Time.deltaTime;
-            if (stuckTimer >= stuckTimeThreshold)
-            {
-                if (status == DroneStatus.RETURN)
-                {
-                    returnStuckCount++;
-
-                    // recovery: depenetrate lebih kuat + wall-follow lebih lama
-                    ResolveOverlapsDistance(12);
-                    returnWallFollowTimer = Mathf.Max(returnWallFollowTimer, returnWallFollowSeconds);
-
-                    // sidestep sesuai follow sign
-                    Vector2 side = (returnFollowSign > 0) ? (Vector2)transform.up : -(Vector2)transform.up;
-                    TryNudge(side * returnSideStep);
-
-                    // sedikit rotasi untuk keluar corner
-                    float ang = (returnFollowSign > 0) ? 85f : -85f;
-                    transform.Rotate(0f, 0f, ang);
-
-                    if (verbose)
-                        Debug.Log($"[Drone:{droneName}] RETURN-RECOVER#{returnStuckCount} distHome={currentReturnDist:F2} f={lastFrontHitDist:F2} l={lastLeftHitDist:F2} r={lastRightHitDist:F2} trail={trail.Count}");
-                }
-                else if (status != DroneStatus.ARRIVED)
-                {
-                    SetStatus(DroneStatus.STUCK);
-                    ForceEscapeTurn();
-                }
-
-                stuckTimer = 0f;
-            }
-        }
-        else
-        {
-            stuckTimer = 0f;
-        }
-
-        lastPos = transform.position;
-    }
-
-    private void TryNudge(Vector2 nudge)
-    {
-        if (nudge.sqrMagnitude < 0.000001f) return;
-
-        Vector2 origin = transform.position;
-        Vector2 dir = nudge.normalized;
-        float dist = nudge.magnitude;
-
-        hitBuf[0] = default;
-        int n = Physics2D.CircleCast(origin, bodyRadius, dir, obstacleFilter, hitBuf, dist);
-
-        if (n == 0 || hitBuf[0].collider == null)
-        {
-            transform.position = (Vector2)transform.position + nudge;
-            return;
-        }
-
-        float safe = Mathf.Max(0f, hitBuf[0].distance - (skin + 0.001f));
-        if (safe > 0.0001f)
-            transform.position = (Vector2)transform.position + dir * safe;
-    }
-
-    private void ForceEscapeTurn()
-    {
-        float ang = Random.Range(110f, 180f);
-        if (Random.value > 0.5f) ang = -ang;
-        transform.Rotate(0f, 0f, ang);
-
-        desiredDirection = transform.right;
-        smoothedDirection = desiredDirection;
-    }
-
-    // =========================================================
-    // IGNORE TARGET COLLISION
-    // =========================================================
-    private void BeginIgnoreTargetAfterFound()
-    {
-        if (target == null) return;
-
-        if (targetColCached == null)
-            targetColCached = target.GetComponent<Collider2D>();
-
-        if (targetColCached == null) return;
-
-        ignoreTargetTimer = Mathf.Max(ignoreTargetTimer, ignoreTargetSecondsAfterFound);
-        ApplyIgnoreTargetCollision(true);
-    }
-
-    private void ApplyIgnoreTargetCollision(bool ignore)
-    {
-        if (target == null) return;
-
-        if (targetColCached == null)
-            targetColCached = target.GetComponent<Collider2D>();
-
-        if (targetColCached == null) return;
-
-        Physics2D.IgnoreCollision(col, targetColCached, ignore);
-    }
-
-    // =========================================================
-    // STATUS
-    // =========================================================
+    // =========================
+    // STATUS + LOGGING
+    // =========================
     private void SetStatus(DroneStatus s)
     {
         if (status == s) return;
@@ -853,13 +373,47 @@ public class Drone : MonoBehaviour
         Debug.Log($"[Drone:{droneName}] STATUS -> {status}");
     }
 
-    // =========================================================
-    // UTIL
-    // =========================================================
-    private float EstimateBodyRadius(Collider2D c)
+    private bool CanLog()
     {
-        Bounds b = c.bounds;
-        float r = Mathf.Max(b.extents.x, b.extents.y);
-        return Mathf.Max(0.05f, r);
+        if (!logState && !logMotion && !logMapping && !logPlanning) return false;
+        if (logEverySeconds <= 0.01f) return true;
+
+        if (Time.time >= nextLogTime)
+        {
+            nextLogTime = Time.time + logEverySeconds;
+            return true;
+        }
+        return false;
     }
+
+    private void LogStateSnapshot(string tag, Vector2 desired, Vector2 smoothed)
+    {
+        if (!logState) return;
+
+        string cellStr = "cell=?";
+        if (map != null && map.WorldToCell(rb.position, out var c))
+        {
+            cellStr = $"cell={c}";
+            if (c != lastCell)
+            {
+                lastCell = c;
+                Debug.Log($"[Drone:{droneName}] CELL -> {c} world={Fmt2(rb.position)}");
+            }
+        }
+
+        string wpStr = "wp=none";
+        if (navigator != null && navigator.HasPath)
+        {
+            Vector2 wp = navigator.GetCurrentWaypointWorld();
+            float dwp = Vector2.Distance(rb.position, wp);
+            wpStr = $"wp={Fmt2(wp)} dwp={dwp:F2} idx={navigator.DebugPathIndex} len={navigator.DebugPathLen} goal={navigator.DebugGoalCell}";
+        }
+
+        Debug.Log(
+            $"[Drone:{droneName}] {tag} status={status} {cellStr} pos={Fmt2(rb.position)} " +
+            $"desired={Fmt2(desired)} smooth={Fmt2(smoothed)} fwd={Fmt2((Vector2)transform.right)} {wpStr}"
+        );
+    }
+
+    private static string Fmt2(Vector2 v) => $"({v.x:F2}, {v.y:F2})";
 }

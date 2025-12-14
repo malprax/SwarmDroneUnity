@@ -2,100 +2,74 @@ using UnityEngine;
 
 public class SimManager : MonoBehaviour
 {
-    [Header("Step-2 Settings (Non-Physics, 1 Drone)")]
-    [Tooltip("Jika kosong, SimManager akan auto-detect Drone pertama di scene.")]
+    [Header("Refs (Scene)")]
     public Drone drone;
+    public GridMap2D map;
 
+    [Header("Objects (Scene)")]
     public Transform target;
     public Transform homeBase;
 
-    [Tooltip("Auto start saat Play.")]
-    public bool autoStart = true;
-
     [Header("Debug")]
-    public bool verboseLog = true;
-
-    private bool isPlaying = false;
+    public bool verbose = true;
 
     private void Awake()
     {
-        if (drone == null)
-        {
-            drone = Object.FindAnyObjectByType<Drone>();
-        }
-
-        if (verboseLog)
-            Debug.Log($"[SimManager] Awake. drone={(drone ? drone.name : "NULL")}");
+        if (verbose)
+            Debug.Log($"[SimManager] Awake. drone={(drone != null ? drone.droneName : "NULL")}");
     }
 
     private void Start()
     {
-        if (!autoStart) return;
         StartSimulation();
     }
 
     public void StartSimulation()
     {
-        if (isPlaying)
-        {
-            if (verboseLog) Debug.Log("[SimManager] StartSimulation() ignored, already playing.");
-            return;
-        }
-
+        // 1) Drone wajib ada
         if (drone == null)
         {
-            Debug.LogError("[SimManager] StartSimulation FAILED: drone is NULL. Pastikan ada object dengan script Drone di scene.");
+            // fallback: cari drone di scene
+            drone = FindFirstObjectByType<Drone>();
+            if (drone == null)
+            {
+                Debug.LogError("[SimManager] Drone is null (and not found in scene)!");
+                return;
+            }
+        }
+
+        // 2) Map fallback
+        if (map == null)
+        {
+            map = FindFirstObjectByType<GridMap2D>();
+            if (map == null)
+            {
+                Debug.LogError("[SimManager] GridMap2D map is null (and not found in scene)!");
+                return;
+            }
+        }
+
+        // 3) Navigator HARUS milik Drone itu sendiri (bukan reference bebas)
+        DroneNavigator nav = drone.GetComponent<DroneNavigator>();
+        if (nav == null)
+        {
+            Debug.LogError("[SimManager] DroneNavigator component is missing on Drone object!");
             return;
         }
 
-        // reset mission state
-        drone.ResetMission();
+        // 4) Inject semua (sekali, jelas)
+        nav.map = map;
 
-        // ✅ capture start position sebagai HOME sebenarnya
-        drone.CaptureStartHomeNow();
+        drone.map = map;
+        drone.navigator = nav;
+        drone.target = target;
+        drone.homeBase = homeBase;
 
-        // inject target/home (homeBase opsional — drone pulang ke startPos)
-        if (target != null) drone.SetTarget(target);
-        if (homeBase != null) drone.SetHome(homeBase);
-
-        isPlaying = true;
-
-        if (verboseLog)
+        if (verbose)
         {
-            Debug.Log($"[SimManager] Step-2 START. Drone={drone.name} pos={drone.transform.position}");
-            Debug.Log($"[SimManager] Inject target={(target ? target.name : "NULL")} home={(homeBase ? homeBase.name : "NULL")}");
-            Debug.Log("[SimManager] Step-2: Avoidance + smooth movement + target detection (LOS) + return to START position.");
+            Debug.Log($"[SimManager] START. Drone={drone.droneName} pos={drone.transform.position}");
+            Debug.Log($"[SimManager] Inject target={(target ? target.name : "NULL")} home={(homeBase ? homeBase.name : "NULL")} map={(map ? map.name : "NULL")} nav={(nav ? nav.name : "NULL")}");
+            Debug.Log("[SimManager] Mode: frontier search + LOS detect + A* return home.");
         }
     }
-
-    public void StopSimulation()
-    {
-        if (!isPlaying) return;
-
-        if (drone != null) drone.StopMission();
-        isPlaying = false;
-
-        if (verboseLog) Debug.Log("[SimManager] STOP.");
-    }
-
-#if UNITY_EDITOR
-    private void OnGUI()
-    {
-        const int w = 220;
-        const int h = 36;
-        int x = 10;
-        int y = 10;
-
-        if (!isPlaying)
-        {
-            if (GUI.Button(new Rect(x, y, w, h), "Start Step-2"))
-                StartSimulation();
-        }
-        else
-        {
-            if (GUI.Button(new Rect(x, y, w, h), "Stop"))
-                StopSimulation();
-        }
-    }
-#endif
 }

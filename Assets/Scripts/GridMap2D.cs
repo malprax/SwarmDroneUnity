@@ -1,237 +1,147 @@
 using UnityEngine;
-using System.Collections.Generic;
 
-public enum CardinalDir { North = 0, East = 1, South = 2, West = 3 }
-
-[System.Serializable]
-public class GridCell
-{
-    // dinding di sekitar cell (N,E,S,W)
-    public bool[] walls = new bool[4];
-    public bool visited;
-}
-
+/// <summary>
+/// Occupancy grid fixed-size:
+/// 0=Unknown, 1=Free, 2=Occupied
+/// </summary>
 public class GridMap2D : MonoBehaviour
 {
-    [Header("Grid Size (jumlah cell)")]
-    public int width  = 32;   // jumlah cell X
-    public int height = 32;   // jumlah cell Y
+    public const byte Unknown = 0;
+    public const byte Free = 1;
+    public const byte Occupied = 2;
 
-    [Header("World ↔ Grid")]
-    public Vector2 worldOrigin = Vector2.zero; // posisi world untuk (0,0)
-    public float cellSize = 1.0f;
+    [Header("Grid Settings (Fixed to Arena ~18x9)")]
+    public float cellSize = 0.3f; // ✅ rekomendasi
+    public int width = 60;        // 18 / 0.3 = 60
+    public int height = 30;       // 9  / 0.3 = 30
 
-    GridCell[,] cells;
+    [Tooltip("World position of cell (0,0) bottom-left corner")]
+    public Vector2 originWorld = new Vector2(-9f, -4.5f); // ✅ bottom-left arena
 
-    void Awake()
+    [Header("Inflation (Safety)")]
+    [Tooltip("Inflate occupied cells by N cells so path doesn't hug walls.")]
+    [Range(0, 4)] public int inflateCells = 1;
+
+    private byte[,] grid;
+    private byte[,] inflatedGrid;
+
+    public int Width => width;
+    public int Height => height;
+    public float CellSize => cellSize;
+
+    private void Awake()
     {
-        cells = new GridCell[width, height];
+        grid = new byte[width, height];
+        inflatedGrid = new byte[width, height];
+
+        // init unknown
         for (int x = 0; x < width; x++)
-        for (int y = 0; y < height; y++)
-            cells[x, y] = new GridCell();
+            for (int y = 0; y < height; y++)
+                grid[x, y] = Unknown;
+
+        RebuildInflation();
     }
 
-    // --------------------------------------------------
-    // KONVERSI POSISI WORLD → INDEX GRID
-    // --------------------------------------------------
-    public bool WorldToCell(Vector2 worldPos, out int cx, out int cy)
+    public bool WorldToCell(Vector2 world, out Vector2Int cell)
     {
-        Vector2 local = worldPos - worldOrigin;
-        cx = Mathf.FloorToInt(local.x / cellSize);
-        cy = Mathf.FloorToInt(local.y / cellSize);
-
-        return (cx >= 0 && cx < width && cy >= 0 && cy < height);
+        int cx = Mathf.FloorToInt((world.x - originWorld.x) / cellSize);
+        int cy = Mathf.FloorToInt((world.y - originWorld.y) / cellSize);
+        cell = new Vector2Int(cx, cy);
+        return InBounds(cell);
     }
 
-    public Vector2 CellToWorldCenter(int cx, int cy)
+    public Vector2 CellToWorldCenter(Vector2Int cell)
     {
-        return worldOrigin + new Vector2(
-            (cx + 0.5f) * cellSize,
-            (cy + 0.5f) * cellSize
+        return new Vector2(
+            originWorld.x + (cell.x + 0.5f) * cellSize,
+            originWorld.y + (cell.y + 0.5f) * cellSize
         );
     }
 
-    public GridCell GetCell(int cx, int cy)
+    public bool InBounds(Vector2Int c)
     {
-        if (cx < 0 || cx >= width || cy < 0 || cy >= height) return null;
-        return cells[cx, cy];
+        return c.x >= 0 && c.x < width && c.y >= 0 && c.y < height;
     }
 
-    // --------------------------------------------------
-    // SET WALL (otomatis set tetangga juga)
-    // --------------------------------------------------
-    public void SetWall(int cx, int cy, CardinalDir dir, bool present)
+    public byte GetCell(Vector2Int c)
     {
-        GridCell c = GetCell(cx, cy);
-        if (c == null) return;
+        if (!InBounds(c)) return Occupied; // out of bounds dianggap dinding
+        return grid[c.x, c.y];
+    }
 
-        int d = (int)dir;
-        c.walls[d] = present;
+    public byte GetCellInflated(Vector2Int c)
+    {
+        if (!InBounds(c)) return Occupied;
+        return inflatedGrid[c.x, c.y];
+    }
 
-        // tetangga
-        int nx = cx, ny = cy;
-        CardinalDir opposite = CardinalDir.North;
+    public void SetFree(Vector2Int c)
+    {
+        if (!InBounds(c)) return;
+        if (grid[c.x, c.y] == Unknown) grid[c.x, c.y] = Free;
+    }
 
-        switch (dir)
+    public void SetOccupied(Vector2Int c)
+    {
+        if (!InBounds(c)) return;
+        if (grid[c.x, c.y] != Occupied)
         {
-            case CardinalDir.North: ny += 1; opposite = CardinalDir.South; break;
-            case CardinalDir.East:  nx += 1; opposite = CardinalDir.West;  break;
-            case CardinalDir.South: ny -= 1; opposite = CardinalDir.North; break;
-            case CardinalDir.West:  nx -= 1; opposite = CardinalDir.East;  break;
+            grid[c.x, c.y] = Occupied;
         }
-
-        GridCell n = GetCell(nx, ny);
-        if (n != null)
-            n.walls[(int)opposite] = present;
     }
 
-    // --------------------------------------------------
-    // Cek boleh jalan dari (cx,cy) ke arah dir ?
-    // --------------------------------------------------
-    public bool CanMove(int cx, int cy, CardinalDir dir)
+    public void RebuildInflation()
     {
-        GridCell c = GetCell(cx, cy);
-        if (c == null) return false;
+        // copy base -> inflated
+        for (int x = 0; x < width; x++)
+            for (int y = 0; y < height; y++)
+                inflatedGrid[x, y] = grid[x, y];
 
-        // Kalau di cell ini ada dinding di arah tsb → tidak boleh lewat
-        if (c.walls[(int)dir]) return false;
+        if (inflateCells <= 0) return;
 
-        int nx = cx, ny = cy;
-        switch (dir)
+        // inflate occupied cells
+        for (int x = 0; x < width; x++)
         {
-            case CardinalDir.North: ny += 1; break;
-            case CardinalDir.East:  nx += 1; break;
-            case CardinalDir.South: ny -= 1; break;
-            case CardinalDir.West:  nx -= 1; break;
-        }
-
-        // Batas grid
-        if (nx < 0 || nx >= width || ny < 0 || ny >= height) return false;
-
-        return true;
-    }
-
-    // --------------------------------------------------
-    // Ambil neighbor yang bisa dicapai dari cell
-    // --------------------------------------------------
-    public IEnumerable<Vector2Int> GetNeighbors(Vector2Int cell)
-    {
-        int cx = cell.x;
-        int cy = cell.y;
-
-        foreach (CardinalDir d in System.Enum.GetValues(typeof(CardinalDir)))
-        {
-            if (!CanMove(cx, cy, d)) continue;
-
-            int nx = cx, ny = cy;
-            switch (d)
+            for (int y = 0; y < height; y++)
             {
-                case CardinalDir.North: ny += 1; break;
-                case CardinalDir.East:  nx += 1; break;
-                case CardinalDir.South: ny -= 1; break;
-                case CardinalDir.West:  nx -= 1; break;
-            }
+                if (grid[x, y] != Occupied) continue;
 
-            yield return new Vector2Int(nx, ny);
-        }
-    }
-
-    // --------------------------------------------------
-    // BFS: cari path dari start → goal (dalam koordinat cell)
-    // --------------------------------------------------
-    public List<Vector2Int> FindPath(Vector2Int start, Vector2Int goal)
-    {
-        // Safety
-        if (GetCell(start.x, start.y) == null ||
-            GetCell(goal.x,  goal.y)  == null)
-        {
-            Debug.LogWarning($"[GridMap2D] FindPath invalid start/goal: {start} -> {goal}");
-            return null;
-        }
-
-        Queue<Vector2Int> q = new Queue<Vector2Int>();
-        q.Enqueue(start);
-
-        Dictionary<Vector2Int, Vector2Int> parent =
-            new Dictionary<Vector2Int, Vector2Int>();
-
-        parent[start] = start;
-
-        bool found = false;
-
-        while (q.Count > 0)
-        {
-            Vector2Int cur = q.Dequeue();
-
-            if (cur == goal)
-            {
-                found = true;
-                break;
-            }
-
-            foreach (var nb in GetNeighbors(cur))
-            {
-                if (parent.ContainsKey(nb)) continue; // sudah dikunjungi
-                parent[nb] = cur;
-                q.Enqueue(nb);
+                for (int dx = -inflateCells; dx <= inflateCells; dx++)
+                {
+                    for (int dy = -inflateCells; dy <= inflateCells; dy++)
+                    {
+                        int nx = x + dx;
+                        int ny = y + dy;
+                        if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
+                        inflatedGrid[nx, ny] = Occupied;
+                    }
+                }
             }
         }
-
-        if (!found)
-        {
-            Debug.LogWarning($"[GridMap2D] No path found {start} -> {goal}");
-            return null;
-        }
-
-        // Rekonstruksi path dari goal → start
-        List<Vector2Int> path = new List<Vector2Int>();
-        Vector2Int node = goal;
-        while (true)
-        {
-            path.Add(node);
-            if (node == start) break;
-            node = parent[node];
-        }
-
-        path.Reverse(); // jadi start → goal
-        return path;
     }
 
 #if UNITY_EDITOR
-    // --------------------------------------------------
-    // Debug tampilan grid + dinding di SceneView
-    // --------------------------------------------------
-    void OnDrawGizmos()
+    [Header("Debug Draw")]
+    public bool drawDebug = false;
+    public int debugDrawStep = 2;
+
+    private void OnDrawGizmos()
     {
-        if (cells == null) return;
+        if (!drawDebug) return;
+        if (grid == null) return;
 
-        float half = cellSize * 0.5f;
-
-        for (int x = 0; x < width; x++)
-        for (int y = 0; y < height; y++)
+        float s = cellSize;
+        for (int x = 0; x < width; x += Mathf.Max(1, debugDrawStep))
         {
-            GridCell c = cells[x, y];
-            if (c == null) continue;
+            for (int y = 0; y < height; y += Mathf.Max(1, debugDrawStep))
+            {
+                byte v = grid[x, y];
+                if (v == Unknown) continue;
 
-            Vector2 center = CellToWorldCenter(x, y);
-
-            // kotak cell
-            Gizmos.color = new Color(1f, 1f, 1f, 0.05f);
-            Gizmos.DrawWireCube(center, Vector3.one * cellSize);
-
-            Gizmos.color = Color.red;
-
-            if (c.walls[(int)CardinalDir.North])
-                Gizmos.DrawLine(center + new Vector2(-half, +half), center + new Vector2(+half, +half));
-
-            if (c.walls[(int)CardinalDir.South])
-                Gizmos.DrawLine(center + new Vector2(-half, -half), center + new Vector2(+half, -half));
-
-            if (c.walls[(int)CardinalDir.East])
-                Gizmos.DrawLine(center + new Vector2(+half, -half), center + new Vector2(+half, +half));
-
-            if (c.walls[(int)CardinalDir.West])
-                Gizmos.DrawLine(center + new Vector2(-half, -half), center + new Vector2(-half, +half));
+                Vector2 c = CellToWorldCenter(new Vector2Int(x, y));
+                Gizmos.color = (v == Occupied) ? Color.red : Color.green;
+                Gizmos.DrawCube(c, new Vector3(s * 0.9f, s * 0.9f, 0.01f));
+            }
         }
     }
 #endif
