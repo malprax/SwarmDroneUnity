@@ -56,6 +56,14 @@ public class Drone : MonoBehaviour
 
     private Rigidbody2D rb;
     private Collider2D col;
+
+    // === Anti tembus dinding (shape cast) ===
+    private readonly RaycastHit2D[] castHits = new RaycastHit2D[8];
+    private ContactFilter2D castFilter;
+
+    // === Anti overlap tipis (push-out) ===
+    private readonly Collider2D[] overlapHits = new Collider2D[16];
+
     private float colRadius = 0.12f; // fallback kalau bukan circle
     private CircleCollider2D circleCol;
 
@@ -110,6 +118,11 @@ public class Drone : MonoBehaviour
 
         if (verbose)
             Debug.Log($"[Drone:{droneName}] Awake startHomePos={Fmt2(startHomePos)} homeArriveDistance={homeArriveDistance:F2} colRadius={colRadius:F2}");
+
+        // Contact filter untuk shape cast (anti tembus tembok)
+        castFilter = new ContactFilter2D();
+        castFilter.useTriggers = false;
+        castFilter.SetLayerMask(obstacleLayerMask);
     }
 
     private void Update()
@@ -158,63 +171,110 @@ public class Drone : MonoBehaviour
     }
 
     private void FixedUpdate()
-{
-    if (isStopped) return;
-
-    // rotate using rb (lebih stabil)
-    float rotStep = fixedTurnVelDeg * Time.fixedDeltaTime;
-    rb.MoveRotation(rb.rotation + rotStep);
-
-    // Escape kalau bener-bener mentok depan (corner lock)
-    if (enableBlockedAheadEscape && IsBlockedAhead())
     {
-        float turn = (Random.value > 0.5f) ? 90f : -90f;
-        rb.MoveRotation(rb.rotation + turn);
+        if (isStopped) return;
+
+        // 1) ROTASI
+        float rotStep = fixedTurnVelDeg * Time.fixedDeltaTime;
+        rb.MoveRotation(rb.rotation + rotStep);
+
+        // 2) ESCAPE JIKA BENAR-BENAR MENTOK
+        if (enableBlockedAheadEscape && IsBlockedAhead())
+        {
+            float turn = (Random.value > 0.5f) ? 90f : -90f;
+            rb.MoveRotation(rb.rotation + turn);
+
+            if (logMotion && CanLog())
+                Debug.Log($"[Drone:{droneName}] ESCAPE blockedAhead -> rotate {turn:+0;-0} deg");
+        }
+
+        // ✅ (A) DEPENETRATION sebelum maju: kalau sudah overlap tipis, dorong keluar dulu
+        ResolveOverlaps();
+
+        // 3) GERAK MAJU DENGAN SHAPE CAST (ANTI TEMBUS)
+        Vector2 forward = transform.right;
+        float stepDist = moveSpeed * Time.fixedDeltaTime;
+
+        int hitCount = rb.Cast(
+            forward,
+            castFilter,
+            castHits,
+            stepDist + skin
+        );
+
+        if (hitCount == 0)
+        {
+            // aman → maju penuh
+            rb.MovePosition(rb.position + forward * stepDist);
+        }
+        else
+        {
+            // ada tembok → maju sejauh aman
+            float minDist = float.PositiveInfinity;
+            RaycastHit2D best = castHits[0];
+
+            for (int i = 0; i < hitCount; i++)
+            {
+                if (castHits[i].distance < minDist)
+                {
+                    minDist = castHits[i].distance;
+                    best = castHits[i];
+                }
+            }
+
+            float safeDist = Mathf.Max(0f, minDist - skin);
+            rb.MovePosition(rb.position + forward * safeDist);
+
+            if (logMotion && CanLog())
+                Debug.Log($"[Drone:{droneName}] BLOCKED(CAST) by={best.collider.name} hitDist={minDist:F3} safeDist={safeDist:F3}");
+        }
+
+        // ✅ (B) DEPENETRATION setelah maju: rapikan lagi kalau solver bikin overlap tipis
+        ResolveOverlaps();
+
+        if (navigator != null)
+            navigator.AdvanceWaypointIfArrived(rb.position);
 
         if (logMotion && CanLog())
-            Debug.Log($"[Drone:{droneName}] ESCAPE blockedAhead -> rotate {turn:+0;-0} deg");
+        {
+            Debug.Log($"[Drone:{droneName}] MOVE pos={Fmt2(rb.position)} step={stepDist:F3} fwd={Fmt2(forward)}");
+        }
     }
 
-    // =========================================================
-    // move forward physics-safe (ANTI "MASUK TEMBOK")
-    // =========================================================
-    Vector2 forward = transform.right;
-
-    // jarak langkah yang ingin ditempuh frame ini
-    float stepDist = moveSpeed * Time.fixedDeltaTime;
-
-    // sweep check: apakah langkah ini akan nabrak tembok?
-    RaycastHit2D hit = Physics2D.CircleCast(
-        rb.position,
-        colRadius,
-        forward,
-        stepDist + skin,           // +skin biar tidak nempel banget
-        obstacleLayerMask
-    );
-
-    if (hit.collider == null)
+    // =========================
+    // DEPENETRATION (push-out)
+    // =========================
+    private void ResolveOverlaps()
     {
-        Vector2 newPos = rb.position + forward * stepDist;
-        rb.MovePosition(newPos);
-    }
-    else
-    {
-        // kalau kena, maju hanya sampai sebelum tembok (pakai jarak hit - skin)
-        float safeDist = Mathf.Max(0f, hit.distance - skin);
-        Vector2 newPos = rb.position + forward * safeDist;
-        rb.MovePosition(newPos);
+        if (col == null) return;
 
-        if (logMotion && CanLog())
-            Debug.Log($"[Drone:{droneName}] BLOCKED by={hit.collider.name} hitDist={hit.distance:F3} safeDist={safeDist:F3}");
-    }
+        // cari collider obstacle di sekitar drone
+        int count = Physics2D.OverlapCircle(
+            rb.position,
+            colRadius + skin + 0.05f,
+            castFilter,
+            overlapHits
+        );
 
-    if (navigator != null) navigator.AdvanceWaypointIfArrived(rb.position);
+        for (int i = 0; i < count; i++)
+        {
+            Collider2D other = overlapHits[i];
+            if (other == null) continue;
+            if (other == col) continue;
 
-    if (logMotion && CanLog())
-    {
-        Debug.Log($"[Drone:{droneName}] MOVE pos={Fmt2(rb.position)} step={stepDist:F3} fwd={Fmt2(forward)}");
+            ColliderDistance2D dist = Physics2D.Distance(col, other);
+
+            if (dist.isOverlapped)
+            {
+                // dist.normal mengarah dari other -> drone
+                float pushDist = (-dist.distance) + skin;
+                rb.position += dist.normal * pushDist;
+
+                if (logMotion && CanLog())
+                    Debug.Log($"[Drone:{droneName}] DEPENETRATE from={other.name} push={pushDist:F3} dir={Fmt2(dist.normal)}");
+            }
+        }
     }
-}
 
     // =========================
     // DECISION
