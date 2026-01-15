@@ -116,14 +116,6 @@ Kalau kamu mau, kirim:
 	•	apakah target pakai Collider Trigger atau mau Raycast detect (lebih “robotic”)
 Aku langsung tulis file Drone.Target.cs + update minimal SimManager untuk Step-2.
 
-
-
-
-
-
-
-
-
 Siap kawan. Kita lanjut Step Stabilisasi & Evaluasi Penelitian (bukan bahas “stuck”), fokusnya: gerak stabil, collision valid, mapping konsisten, planner konsisten, dan metrik eksperimen siap publish.
 
 ⸻
@@ -272,3 +264,18 @@ Kalau kawan setuju, balas saja dengan:
 	•	“gas update DroneNavigator.cs + SimManager.cs”
 dan (kalau bisa) kirim:
 	•	isi file DroneNavigator.cs dan SimManager.cs yang kamu pakai sekarang (biar aku update tanpa merusak struktur yang sudah fix).
+
+
+	apa kebijakan startegis pemerintah terkait penelitianku,saya buat proposal untuk bima dengan format kata kta seperti contoh ini, dan apa kira kira judul yang bisa kamu tawarkan kepada saya terkait penelitian saya yang terbaru tentang drone
+
+
+
+	Jelaskan secara singkat mengenai:
+	a.	penjelasan mengenai inovasi yang diusulkan: deskripsi, keunggulan, dampak sosial dan ekonomi;
+	b.	penjelasan mengenai peningkatan nilai Tingkat Kesiapterapan Teknologi (TKT) harus disertai dengan dokumen pendukung berupa foto dan/atau desain produk yang telah dikembangkan sebelumnya;
+	c.	penjelasan mengenai teknologi, sarana, dan bahan baku yang dibutuhkan untuk mengembangkan karya inovasi;
+	d.	peta jalan/roadmap pengembangan produk;
+	e.	metode pengujian dan rencana kerja;
+	f.	foto produk yang ada saat ini; dan
+	g.	rencana desain, implementasi, dan pengujian produk.
+	
