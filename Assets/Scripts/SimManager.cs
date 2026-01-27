@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.IO;
 using UnityEngine;
+using UnityEngine.Events;
 
 public class SimManager : MonoBehaviour
 {
@@ -42,6 +43,12 @@ public class SimManager : MonoBehaviour
     [Header("Complete Behavior")]
     public bool autoPauseOnComplete = false; // MonteCarlo = false
 
+    // =========================================================
+    // UI (CSV Button State) - REQUIRED by OpenCsvButtonBinder.cs
+    // =========================================================
+    [Header("UI (CSV Button State)")]
+    public UnityEvent<bool> onCsvReadyChanged = new UnityEvent<bool>();
+
     [Header("Batch Safety")]
     [Tooltip("Batas maksimum per-run (REAL TIME). Naikkan kalau ingin hampir tidak ada FAIL.")]
     public float runTimeoutSecondsReal = 120f;
@@ -52,11 +59,33 @@ public class SimManager : MonoBehaviour
     public float targetProbeRadius = 0.18f;
     public int targetResampleMax = 40;
 
+    // =========================
+    // Dispersion (match Drone.cs SMART launch)
+    // =========================
+    [Header("Launch Dispersal (SMART)")]
+    [Tooltip("Jika true, tiap run akan set teamIndex pada drone (0..2) agar heading bias unik.")]
+    public bool setTeamIndexFromArrayOrder = true;
+
+    [Tooltip("Kalau true, gunakan assigned room juga (legacy). Kalau arena dinamis, sebaiknya OFF.")]
+    public bool useLegacyRoomAssignment = false;
+
+    [Header("Rooms (Legacy Dispersion)")]
+    [Tooltip("Isi 3 anchor: Room1Center, Room2Center, Room3Center.")]
+    public Transform[] roomAnchors = new Transform[3];
+
+    [Tooltip("Jika true, room assignment akan di-random per run (legacy).")]
+    public bool randomRoomAssignmentEachRun = true;
+
     [Header("Debug")]
     public bool verbose = true;
 
-    // CSV
+    // =========================
+    // CSV State
+    // =========================
     private string lastCsvPath = "";
+
+    // Ini yang menentukan tombol OpenCSV unlock setelah batch benar2 selesai
+    private bool csvReadyForUser = false;
 
     // batch control
     private Coroutine batchCo;
@@ -69,12 +98,36 @@ public class SimManager : MonoBehaviour
 
     private void Start()
     {
-        // WAJIB biar coroutine jalan walau window tidak fokus
         Application.runInBackground = true;
+
+        // awal game: CSV belum ready untuk user
+        csvReadyForUser = false;
+        NotifyCsvReadyChanged();
 
         StartSimulation();
     }
 
+    // =========================================================
+    // REQUIRED by OpenCsvButtonBinder.cs
+    // =========================================================
+    public bool IsCsvReadyToOpen()
+    {
+        // ✅ kunci utama: harus selesai batch dulu
+        if (!csvReadyForUser) return false;
+
+        return !string.IsNullOrEmpty(lastCsvPath) && File.Exists(lastCsvPath);
+    }
+
+    private void NotifyCsvReadyChanged()
+    {
+        onCsvReadyChanged?.Invoke(IsCsvReadyToOpen());
+        if (verbose)
+            Debug.Log($"[SimManager] CSV Ready Changed => {IsCsvReadyToOpen()}  (csvReadyForUser={csvReadyForUser})  path={lastCsvPath}");
+    }
+
+    // =========================================================
+    // Simulation Setup
+    // =========================================================
     public void StartSimulation()
     {
         // reset mission state
@@ -121,16 +174,17 @@ public class SimManager : MonoBehaviour
             if (!d) continue;
 
             var rb = d.GetComponent<Rigidbody2D>();
+
             if (useFixedStartPositions && startPositions != null && startPositions.Length >= 3)
             {
                 if (rb) rb.position = startPositions[i];
                 else d.transform.position = startPositions[i];
             }
 
-            // ✅ RESET runtime state drone (ini yang kemarin hilang)
+            // reset runtime state drone
             d.ResetRuntimeState();
 
-            // ✅ reset fisika (biar tidak carry velocity/rot)
+            // reset fisika
             if (rb)
             {
                 rb.linearVelocity = Vector2.zero;
@@ -160,7 +214,13 @@ public class SimManager : MonoBehaviour
             d.homeBase = homeBase;
             d.simManager = this;
 
-            d.returnHomePos = startPositions[i];
+            // return point (home) = start position masing-masing
+            if (startPositions != null && startPositions.Length >= 3)
+                d.returnHomePos = startPositions[i];
+
+            // set teamIndex untuk Launch Dispersal (SMART)
+            if (setTeamIndexFromArrayOrder)
+                d.teamIndex = i;
 
             // standby
             d.SetStandby(startInStandby);
@@ -168,9 +228,6 @@ public class SimManager : MonoBehaviour
             // reset counters (CSV)
             d.wallCollisionCount = 0;
             d.droneCollisionCount = 0;
-
-            // OPTIONAL: kalau kamu punya fungsi reset di navigator, panggil di sini
-            // nav.ResetForNewRun();
         }
 
         if (randomLeaderOnPlay)
@@ -179,14 +236,52 @@ public class SimManager : MonoBehaviour
             RandomizeLeader(s);
         }
 
+        if (useLegacyRoomAssignment)
+            AssignRoomsLegacy();
+
         if (verbose)
         {
             Debug.Log($"[SimManager] READY (standby={startInStandby}).");
-            Debug.Log($"[SimManager] Return points: D1={startPositions[0]} D2={startPositions[1]} D3={startPositions[2]}");
+            if (startPositions != null && startPositions.Length >= 3)
+                Debug.Log($"[SimManager] Return points: D1={startPositions[0]} D2={startPositions[1]} D3={startPositions[2]}");
         }
     }
 
+    private void AssignRoomsLegacy()
+    {
+        if (roomAnchors == null || roomAnchors.Length < 3 || !roomAnchors[0] || !roomAnchors[1] || !roomAnchors[2])
+        {
+            if (verbose) Debug.LogWarning("[SimManager] roomAnchors not set (3 required). Legacy room assignment skipped.");
+            return;
+        }
+
+        int[] idx = new int[3] { 0, 1, 2 };
+
+        if (randomRoomAssignmentEachRun)
+        {
+            int s2 = (seed == 0) ? Environment.TickCount : seed;
+            UnityEngine.Random.InitState(s2);
+
+            for (int i = 0; i < 3; i++)
+            {
+                int j = UnityEngine.Random.Range(i, 3);
+                (idx[i], idx[j]) = (idx[j], idx[i]);
+            }
+        }
+
+        for (int i = 0; i < 3; i++)
+        {
+            if (!drones[i]) continue;
+            drones[i].AssignRoom(roomAnchors[idx[i]]);
+        }
+
+        if (verbose)
+            Debug.Log($"[SimManager] (Legacy) Room assignment: D1->{roomAnchors[idx[0]].name}, D2->{roomAnchors[idx[1]].name}, D3->{roomAnchors[idx[2]].name}");
+    }
+
+    // =========================================================
     // Manual Run
+    // =========================================================
     public void StartManualRun()
     {
         stopRequested = false;
@@ -195,10 +290,13 @@ public class SimManager : MonoBehaviour
 
         StartSimulation();
         BeginMission();
+
         Debug.Log("[SimManager] Manual Run started");
     }
 
-    // Batch Run (legacy UI signature)
+    // =========================================================
+    // Batch Run
+    // =========================================================
     public void StartBatchRun(
         int runs,
         float timeScale,
@@ -230,6 +328,11 @@ public class SimManager : MonoBehaviour
 
         if (target != null) target.position = initialTargetPos;
 
+        // ✅ mulai batch => LOCK OpenCSV
+        csvReadyForUser = false;
+        lastCsvPath = ""; // reset supaya pasti lock
+        NotifyCsvReadyChanged();
+
         batchCo = StartCoroutine(BatchRoutine(runs, timeScale, randomLeaderEachRun, randomTargetEachRun, targetMin, targetMax));
         Debug.Log($"[SimManager] Batch Run started: runs={runs}, timeScale={timeScale}");
     }
@@ -239,9 +342,15 @@ public class SimManager : MonoBehaviour
         stopRequested = true;
         if (batchCo != null) { StopCoroutine(batchCo); batchCo = null; }
         Time.timeScale = 1f;
+
+        // kalau stop manual, tetap kalau file ada kita boleh unlock
+        csvReadyForUser = !string.IsNullOrEmpty(lastCsvPath) && File.Exists(lastCsvPath);
+        NotifyCsvReadyChanged();
+
         Debug.Log("[SimManager] Run stopped");
     }
 
+    // REQUIRED by binder click
     public void OpenLastCsvFolder()
     {
         if (string.IsNullOrEmpty(lastCsvPath))
@@ -269,10 +378,47 @@ public class SimManager : MonoBehaviour
         Debug.Log($"[SimManager] Opened CSV folder:\n{folder}");
     }
 
+    public void OpenLastCsvFile()
+{
+    if (string.IsNullOrEmpty(lastCsvPath))
+    {
+        Debug.LogError("[SimManager] CSV not ready yet. Run Batch first!");
+        return;
+    }
+
+    if (!File.Exists(lastCsvPath))
+    {
+        Debug.LogError($"[SimManager] CSV file NOT FOUND:\n{lastCsvPath}");
+        return;
+    }
+
+#if UNITY_EDITOR_OSX || UNITY_STANDALONE_OSX
+    // Mac: buka file langsung dengan default app (Numbers/Excel/LibreOffice)
+    System.Diagnostics.Process.Start("open", lastCsvPath);
+
+#elif UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN
+    // Windows: buka file langsung dengan default app
+    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(lastCsvPath)
+    {
+        UseShellExecute = true
+    });
+
+#else
+    // fallback
+    Application.OpenURL("file://" + lastCsvPath);
+#endif
+
+    Debug.Log($"[SimManager] Opened CSV file:\n{lastCsvPath}");
+}
     public void BeginMission()
     {
         for (int i = 0; i < drones.Length; i++)
-            if (drones[i] != null) drones[i].SetStandby(false);
+        {
+            if (drones[i] == null) continue;
+
+            drones[i].SetStandby(false);
+            drones[i].MarkMissionStarted(); // launch dispersal
+        }
 
         if (verbose) Debug.Log("[SimManager] MISSION START");
     }
@@ -285,14 +431,15 @@ public class SimManager : MonoBehaviour
         int leaderIndex = UnityEngine.Random.Range(0, 3);
 
         for (int i = 0; i < 3; i++)
-            drones[i].SetRole(i == leaderIndex ? Drone.DroneRole.Leader : Drone.DroneRole.Member);
+            if (drones[i] != null)
+                drones[i].SetRole(i == leaderIndex ? Drone.DroneRole.Leader : Drone.DroneRole.Member);
 
-        if (verbose) Debug.Log($"[SimManager] Leader={drones[leaderIndex].droneName} seed={seedValue}");
+        if (verbose && drones[leaderIndex] != null)
+            Debug.Log($"[SimManager] Leader={drones[leaderIndex].droneName} seed={seedValue}");
     }
 
     private Vector2 PickValidTarget(Vector2 min, Vector2 max)
     {
-        // fallback
         if (obstacleLayerMask.value == 0)
         {
             float x0 = UnityEngine.Random.Range(min.x, max.x);
@@ -306,12 +453,10 @@ public class SimManager : MonoBehaviour
             float y = UnityEngine.Random.Range(min.y, max.y);
             Vector2 p = new Vector2(x, y);
 
-            // ✅ tidak boleh spawn di dalam wall
             bool blocked = Physics2D.OverlapCircle(p, Mathf.Max(0.01f, targetProbeRadius), obstacleLayerMask) != null;
             if (!blocked) return p;
         }
 
-        // kalau gagal terus, return random biasa (biar tidak hang)
         float xf = UnityEngine.Random.Range(min.x, max.x);
         float yf = UnityEngine.Random.Range(min.y, max.y);
         return new Vector2(xf, yf);
@@ -401,7 +546,6 @@ public class SimManager : MonoBehaviour
                 sw.Flush();
 
                 Debug.Log($"[SimManager] RUN {r}/{runs} END status={status} total={totalTime:F2}s find={timeToFind:F2}s");
-
                 yield return null;
             }
         }
@@ -416,6 +560,10 @@ public class SimManager : MonoBehaviour
 
             Time.timeScale = 1f;
             batchCo = null;
+
+            // ✅ batch selesai => UNLOCK OpenCSV
+            csvReadyForUser = !string.IsNullOrEmpty(lastCsvPath) && File.Exists(lastCsvPath);
+            NotifyCsvReadyChanged();
 
             Debug.Log($"[SimManager] Batch finished. CSV saved at:\n{lastCsvPath}");
         }

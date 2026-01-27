@@ -322,12 +322,22 @@ MonoBehaviour:
   homeBase: {fileID: 1116153140}
   startInStandby: 1
   autoPauseOnComplete: 0
+  onCsvReadyChanged:
+    m_PersistentCalls:
+      m_Calls: []
   runTimeoutSecondsReal: 20
   obstacleLayerMask:
     serializedVersion: 2
     m_Bits: 0
   targetProbeRadius: 0.18
   targetResampleMax: 40
+  setTeamIndexFromArrayOrder: 1
+  useLegacyRoomAssignment: 0
+  roomAnchors:
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  randomRoomAssignmentEachRun: 1
   verbose: 1
 --- !u!4 &22667979
 Transform:
@@ -693,7 +703,7 @@ SpriteRenderer:
   m_GlobalIlluminationMeshLod: 0
   m_SortingLayerID: 0
   m_SortingLayer: 0
-  m_SortingOrder: 1
+  m_SortingOrder: 0
   m_Sprite: {fileID: 7482667652216324306, guid: 6a04b2ed4334c4542be9924e9f77c5d3, type: 3}
   m_Color: {r: 0.9333334, g: 0.8666667, b: 0.509804, a: 1}
   m_FlipX: 0
@@ -1370,7 +1380,7 @@ SpriteRenderer:
   m_GlobalIlluminationMeshLod: 0
   m_SortingLayerID: 0
   m_SortingLayer: 0
-  m_SortingOrder: 1
+  m_SortingOrder: 0
   m_Sprite: {fileID: 7482667652216324306, guid: 6a04b2ed4334c4542be9924e9f77c5d3, type: 3}
   m_Color: {r: 0.9333334, g: 0.8666667, b: 0.509804, a: 1}
   m_FlipX: 0
@@ -1695,6 +1705,17 @@ MonoBehaviour:
   moveSpeed: 2
   turnSpeedDeg: 220
   steeringSmoothing: 10
+  enableLaunchDispersal: 1
+  launchDisperseSeconds: 2
+  launchMinInterDroneDistance: 1.6
+  launchAwayFromHomeWeight: 1.2
+  launchRepulsionWeight: 3
+  launchHeadingBiasWeight: 0.7
+  launchJitterWeight: 0.2
+  teamIndex: -1
+  assignedRoomAnchor: {fileID: 0}
+  assignedRoomArriveDistance: 0.8
+  mustGoToAssignedRoomFirst: 1
   obstacleLayerMask:
     serializedVersion: 2
     m_Bits: 128
@@ -4517,7 +4538,7 @@ SpriteRenderer:
   m_GlobalIlluminationMeshLod: 0
   m_SortingLayerID: 0
   m_SortingLayer: 0
-  m_SortingOrder: 1
+  m_SortingOrder: 0
   m_Sprite: {fileID: 7482667652216324306, guid: 6a04b2ed4334c4542be9924e9f77c5d3, type: 3}
   m_Color: {r: 0.9333334, g: 0.8666667, b: 0.509804, a: 1}
   m_FlipX: 0
@@ -5860,6 +5881,17 @@ MonoBehaviour:
   moveSpeed: 2
   turnSpeedDeg: 220
   steeringSmoothing: 10
+  enableLaunchDispersal: 1
+  launchDisperseSeconds: 2
+  launchMinInterDroneDistance: 1.6
+  launchAwayFromHomeWeight: 1.2
+  launchRepulsionWeight: 3
+  launchHeadingBiasWeight: 0.7
+  launchJitterWeight: 0.2
+  teamIndex: -1
+  assignedRoomAnchor: {fileID: 0}
+  assignedRoomArriveDistance: 0.8
+  mustGoToAssignedRoomFirst: 1
   obstacleLayerMask:
     serializedVersion: 2
     m_Bits: 128
@@ -6389,6 +6421,17 @@ MonoBehaviour:
   moveSpeed: 2
   turnSpeedDeg: 220
   steeringSmoothing: 10
+  enableLaunchDispersal: 1
+  launchDisperseSeconds: 2
+  launchMinInterDroneDistance: 1.6
+  launchAwayFromHomeWeight: 1.2
+  launchRepulsionWeight: 3
+  launchHeadingBiasWeight: 0.7
+  launchJitterWeight: 0.2
+  teamIndex: -1
+  assignedRoomAnchor: {fileID: 0}
+  assignedRoomArriveDistance: 0.8
+  mustGoToAssignedRoomFirst: 1
   obstacleLayerMask:
     serializedVersion: 2
     m_Bits: 128
@@ -7710,7 +7753,7 @@ Transform:
   m_GameObject: {fileID: 1663345214}
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: 11.39, y: 2.45, z: 0}
+  m_LocalPosition: {x: -11.33, y: 4.69, z: 1.16}
   m_LocalScale: {x: 1.6101412, y: 1.6101412, z: 1.6101412}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -8702,7 +8745,7 @@ SpriteRenderer:
   m_GlobalIlluminationMeshLod: 0
   m_SortingLayerID: 0
   m_SortingLayer: 0
-  m_SortingOrder: 1
+  m_SortingOrder: 0
   m_Sprite: {fileID: 7482667652216324306, guid: 513e19d7c6e5a4c8aa569e0717dd04c5, type: 3}
   m_Color: {r: 0.9333334, g: 0.8666667, b: 0.509804, a: 1}
   m_FlipX: 0
@@ -9222,6 +9265,7 @@ GameObject:
   - component: {fileID: 2069546685}
   - component: {fileID: 2069546684}
   - component: {fileID: 2069546687}
+  - component: {fileID: 2069546688}
   m_Layer: 5
   m_Name: BtnOpenCsv
   m_TagString: Untagged
@@ -9351,6 +9395,21 @@ MonoBehaviour:
   m_FlexibleWidth: -1
   m_FlexibleHeight: -1
   m_LayoutPriority: 1
+--- !u!114 &2069546688
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2069546682}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 24248db8044af4a22b42978277f88e47, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::OpenCsvButtonBinder
+  sim: {fileID: 22667978}
+  lockedColor: {r: 0.55, g: 0.55, b: 0.55, a: 1}
+  readyColor: {r: 0, g: 0, b: 0, a: 1}
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
