@@ -4,66 +4,73 @@ Physics-Based Probabilistic Swarm Drone Simulation for Indoor Object Search
 
 ## Overview
 
-This repository contains the source code and simulation framework used in the
-journal article:
+This repository provides the complete simulation framework and source code
+used in the journal article:
 
 **“Probabilistic Modeling and Experimental Validation of Swarm Drones for Object Search Missions under Dynamic Performance Variations”**
 
 The project implements a physics-based indoor swarm drone simulation using a
-leader–slave coordination structure and probabilistic decision-making under
-mechanical feasibility constraints. The simulation is designed to evaluate how
-decision robustness interacts with quadrotor dynamics, collision avoidance, and
-environmental uncertainty in confined indoor spaces.
+fixed leader–slave coordination structure combined with probabilistic
+decision-making under explicit mechanical feasibility constraints. The
+simulation is intended to study the interaction between stochastic
+decision policies, quadrotor dynamics, collision behavior, and environmental
+uncertainty in confined indoor environments.
 
-All results reported in the paper are generated using this repository.
+All simulation results, figures, and statistical analyses reported in the
+article are generated using this repository.
 
 ---
 
 ## Key Features
 
-- Physics-based indoor quadrotor simulation (Unity engine)
-- Leader–slave swarm coordination (fixed roles)
-- Probabilistic belief-based target search
-- Monte Carlo rollout decision evaluation
-- Mechanical feasibility constraints:
+- Physics-based indoor quadrotor simulation implemented in the Unity engine
+- Fixed leader–slave swarm coordination architecture
+- Probabilistic belief-based object search
+- Monte Carlo rollout-based decision evaluation
+- Explicit mechanical feasibility constraints, including:
   - Thrust limits
   - Rotor speed bounds
   - Rigid-body dynamics
-- Collision-aware motion execution
-- Large-scale Monte Carlo experimentation (N = 1000)
+- Collision-aware motion execution and logging
+- Large-scale Monte Carlo experimentation (N = 1000 runs)
 
 ---
 
 ## System Architecture
 
+The swarm consists of three quadrotor agents operating under fixed roles:
+
 - **Leader drone**
-  - Belief aggregation
-  - Global coordination
-  - Mission supervision
+  - Global belief aggregation
+  - Coordination and mission supervision
+  - Monitoring of overall swarm progress
 
 - **Slave drones**
-  - Local exploration
+  - Local exploration and navigation
   - Sensing and target detection
-  - Physically constrained navigation
+  - Execution of mechanically constrained motion commands
 
-Decision-making is explicitly filtered through mechanical constraints to ensure
-all executed actions remain physically realizable.
+Decision-making at the agent level is explicitly filtered through mechanical
+constraints to ensure that all executed actions remain physically realizable
+for indoor quadrotor platforms.
 
 ---
 
 ## Simulation Environment
 
-The indoor environment consists of:
+The simulated indoor environment consists of:
 - A central home base
 - Multiple enclosed rooms
 - Narrow passages and wall boundaries
 
-This layout is intentionally designed to introduce:
+This configuration is intentionally designed to introduce:
 - Partial observability
-- Limited maneuvering space
+- Restricted maneuvering space
 - Elevated collision risk
 
-The environment geometry mirrors the configuration used in the paper.
+The environment geometry and spatial constraints correspond directly to those
+used in the experimental evaluation presented in the associated journal
+article.
 
 ---
 
@@ -72,7 +79,7 @@ The environment geometry mirrors the configuration used in the paper.
 ```text
 SwarmDroneUnity/
 ├── Assets/
-│   ├── Scripts/          # Decision-making, swarm logic, dynamics
+│   ├── Scripts/          # Swarm logic, probabilistic decision-making, dynamics
 │   ├── Scenes/           # Indoor environments and simulation scenes
 │   ├── Prefabs/          # Drone and environment prefabs
 │   └── Materials/        # Visual and physical materials
